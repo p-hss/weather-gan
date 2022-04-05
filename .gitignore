@@ -1,0 +1,13 @@
+data/
+figures/
+lightning_logs/
+*.gz
+*.pt
+*ubyte
+*.pyc
+.vscode
+notebooks/.ipynb_checkpoints/
+src/.ipynb_checkpoints/
+*.sif
+*.html
+*.loc
