@@ -281,6 +281,7 @@ def pipeline(input_source, target_source):
     # add transforms below:
     inputs = fn.python_function(inputs, function=Transforms().log)
     inputs = fn.python_function(inputs, function=Transforms().normalize)
+    inputs = fn.python_function(inputs, function=Transforms().crop)
     
     targets = fn.external_source(source=target_source,
                                  layout="CHW",
@@ -288,6 +289,7 @@ def pipeline(input_source, target_source):
     # add transforms below:
     targets = fn.python_function(targets, function=Transforms().log)
     targets = fn.python_function(targets, function=Transforms().normalize)
+    targets = fn.python_function(targets, function=Transforms().crop)
     return inputs, targets
 
 
@@ -306,7 +308,7 @@ class Transforms():
         self.scale_factor = 100
         
     def crop(self, x):
-        return x[:-5,:-50]
+        return x[:,:-1]
 
     def abs(self, x):
         return np.abs(x)

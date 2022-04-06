@@ -7,6 +7,8 @@ import torchvision.transforms as transforms
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 from pytorch_lightning.core import LightningModule
+from torch.autograd import grad as torch_grad
+from torch.autograd import Variable
 
 from src.model import Generator, Discriminator
 
@@ -46,28 +48,60 @@ class WeatherGenerator(LightningModule):
     def forward(self, z):
         return self.generator(z)
 
+    def gradient_penalty(self, real_data, generated_data):
+        batch_size = real_data.size()[0]
 
-    def compute_gradient_penalty(self, real_samples, fake_samples):
-        """Calculates the gradient penalty loss for WGAN GP"""
-        # Random weight term for interpolation between real and fake samples
-        alpha = torch.Tensor(np.random.random((real_samples.size(0), 1, 1, 1))).to(self.device)
-        # Get random interpolation between real and fake samples
-        interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
-        interpolates = interpolates.to(self.device)
-        d_interpolates = self.discriminator(interpolates)
-        fake = torch.Tensor(real_samples.shape[0], 1).fill_(1.0).to(self.device)
-        # Get gradient w.r.t. interpolates
-        gradients = torch.autograd.grad(
-            outputs=d_interpolates,
-            inputs=interpolates,
-            grad_outputs=fake,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        gradients = gradients.view(gradients.size(0), -1).to(self.device)
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-        return gradient_penalty
+        # Calculate interpolation
+        alpha = torch.rand(batch_size, 1, 1, 1).to(self.device)
+        alpha = alpha.expand_as(real_data)
+
+        interpolated = alpha * real_data.data + (1 - alpha) * generated_data.data
+        interpolated = Variable(interpolated, requires_grad=True)
+
+
+        # Calculate probability of interpolated examples
+        prob_interpolated = self.discriminator(interpolated)
+
+        # Calculate gradients of probabilities with respect to examples
+        gradients = torch_grad(outputs=prob_interpolated, inputs=interpolated,
+                               grad_outputs=torch.ones(prob_interpolated.size()).to(self.device),
+                               create_graph=True, retain_graph=True)[0]
+
+        # Gradients have shape (batch_size, num_channels, img_width, img_height),
+        # so flatten to easily take norm per example in batch
+        gradients = gradients.view(batch_size, -1)
+        #self.losses['gradient_norm'].append(gradients.norm(2, dim=1).mean().data[0])
+
+        # Derivatives of the gradient close to 0 can cause problems because of
+        # the square root, so manually calculate norm and add epsilon
+        gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
+
+        # Return gradient penalty
+        return ((gradients_norm - 1) ** 2).mean()    
+
+    #def compute_gradient_penalty(self, real_samples, fake_samples):
+    #    """Calculates the gradient penalty loss for WGAN GP"""
+    #    print(real_samples.shape, fake_samples.shape)
+
+    #    # Random weight term for interpolation between real and fake samples
+    #    alpha = torch.Tensor(np.random.random(real_samples.shape)).to(self.device)
+    #    # Get random interpolation between real and fake samples
+    #    interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
+    #    interpolates = interpolates.to(self.device)
+    #    d_interpolates = self.discriminator(interpolates)
+    #    fake = torch.Tensor(real_samples.shape).fill_(1.0).to(self.device)
+    #    # Get gradient w.r.t. interpolates
+    #    gradients = torch.autograd.grad(
+    #        outputs=d_interpolates,
+    #        inputs=interpolates,
+    #        grad_outputs=fake,
+    #        create_graph=True,
+    #        retain_graph=True,
+    #        only_inputs=True,
+    #    )[0]
+    #    gradients = gradients.view(gradients.size(0), -1).to(self.device)
+    #    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+    #    return gradient_penalty
 
 
     def training_step(self, batch, batch_idx, optimizer_idx):
@@ -98,7 +132,6 @@ class WeatherGenerator(LightningModule):
             valid = valid.type_as(input)
 
             generated_fields = self(input)
-            print(generated_fields.shape)
 
             g_loss = -torch.mean(self.discriminator(generated_fields))
             tqdm_dict = {'g_loss': g_loss}
@@ -119,10 +152,9 @@ class WeatherGenerator(LightningModule):
             # Fake images
             fake_validity = self.discriminator(fake_imgs)
             # Gradient penalty
-            #gradient_penalty = self.compute_gradient_penalty(imgs.data, fake_imgs.data)
+            gradient_penalty = self.gradient_penalty(target.data, fake_imgs.data)
             # Adversarial loss
-            #d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
-            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp 
+            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
 
             tqdm_dict = {'d_loss': d_loss}
             output = OrderedDict({
