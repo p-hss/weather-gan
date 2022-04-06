@@ -192,7 +192,6 @@ class DaliLoader():
         return self.dali_iterator.__iter__()
 
 
-
 class ExternalInputIterator(object):
     """ 
         Samples batches from Xarray dataset.
@@ -239,7 +238,6 @@ class ExternalInputIterator(object):
                     image = self.dataset[var].sel(time=date)
                     image_tensor = torch.from_numpy(image.values).squeeze()
 
-                #image = torch.from_numpy(image.values).to(self.device)
                 #image tensor should have shape (H,W)
                 channel.append(image_tensor)
                 
@@ -252,12 +250,11 @@ class ExternalInputIterator(object):
             else:
                 self.i = (self.i + 1) % self.n
             
-        #sample = torch.concat(batch)
         sample = torch.cat(batch)
-        #sample = sample.unsqueeze(-1) # create a channel
         sample = sample.to(self.device)
         
         return sample
+
 
 def random_date(monthly_times: xr.DataArray, index) -> str:
     month = str(monthly_times.isel(time=index)['time.month'].values) 
@@ -266,18 +263,24 @@ def random_date(monthly_times: xr.DataArray, index) -> str:
     date_str = f'{year}-{month.zfill(2)}-{random_day.zfill(2)}'
     return date_str
 
+
 @pipeline_def
 def pipeline(input_source, target_source):
     """ Pipelines for input and target """
-     
-    inputs = fn.external_source(source=input_source, layout="CHW", device="gpu")
+    inputs = fn.external_source(source=input_source,
+                                layout="CHW",
+                                device="gpu")
+
     # add transforms below:
-    inputs = fn.python_function(inputs, function=Transforms().crop)
-    inputs = fn.python_function(inputs, function=Transforms().scale)
+    inputs = fn.python_function(inputs, function=Transforms().log)
+    inputs = fn.python_function(inputs, function=Transforms().normalize)
     
-    targets = fn.external_source(source=target_source, layout="CHW", device="gpu")
+    targets = fn.external_source(source=target_source,
+                                 layout="CHW",
+                                 device="gpu")
     # add transforms below:
-    targets = fn.python_function(targets, function=Transforms().crop)
+    targets = fn.python_function(targets, function=Transforms().log)
+    targets = fn.python_function(targets, function=Transforms().normalize)
     return inputs, targets
 
 
@@ -285,34 +288,45 @@ class Transforms():
     
     def __init__(self, min_ref=0, max_ref=4):
         self.epsilon = 0.0001
-        self.min_ref = min_ref 
-        self.max_ref = max_ref
-        self.log = np.log
-        self.exp = np.exp
+        self.temperature_min_ref = 190
+        self.temperature_max_ref = 320
+
+        self.log_precipitation_min_ref = 0 
+        self.log_precipitation_max_ref = 4
+
+        self.log_function = np.log
+        self.exp_function = np.exp
         self.scale_factor = 100
         
     def crop(self, x):
         return x[:-5,:-50]
-    
-    def scale(self, x):
-        return x*self.scale_factor
+
+    def abs(self, x):
+        return np.abs(x)
     
     def log(self, x):
-        return self.log(x + self.epsilon) - self.log(self.epsilon)
-    
+        """applies log transform to one variable only """
+        x[:,:,0] = self.log_function(x[:,:,0] + self.epsilon) - self.log_function(self.epsilon)
+        return  x    
+
     def inverse_log(self, x):
-        return self.exp(x + self.log(self.epsilon)) - self.epsilon
+        x[:,:,0] = self.exp_function(x[:,:,0] + self.log_function(self.epsilon)) - self.epsilon
+        return x
 
     def normalize(self, x):
         """ normalize to [-1, 1] """
-        results = (x - self.min_ref)/(self.max_ref - self.min_ref)
-        results = results*2 - 1
-        return results
+        x[:,:,0] = (x[:,:,0] - self.log_precipitation_min_ref)/(self.log_precipitation_max_ref - self.log_precipitation_min_ref)
+        x[:,:,1] = (x[:,:,1] - self.temperature_min_ref)/(self.temperature_max_ref - self.temperature_min_ref)
+        x = x*2 - 1
+        return x
     
     def inverse_normalize(self, x):
         x = (x + 1)/2
-        results = x * (self.max_ref - self.min_ref) + self.min_ref
-        return results
+
+        x[:,:,0] = x[:,:,0]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
+        x[:,:,1] = x[:,:,1]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
+        x = x * (self.max_ref - self.min_ref) + self.min_ref
+        return x 
     
     def test(self):
         x = np.ones((10,10))
