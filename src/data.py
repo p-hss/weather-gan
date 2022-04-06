@@ -33,10 +33,11 @@ class DataModule(pl.LightningDataModule):
         #self.num_workers = num_workers
         self.train_batch_size = train_batch_size
         self.test_batch_size = test_batch_size
-        self.input_variables = ['precipitation', 'precipitation_2']
-        self.target_variables = ['precipitation', 'precipitation_2']
-        self.input_fname = '/home/ftei-dsw/data/dataloader/cmip_2.nc'
-        self.target_fname = '/home/ftei-dsw/data/dataloader/cmip_2.nc'
+        # order of variable lists matters!
+        self.input_variables = ['precipitation', 'temperature']
+        self.target_variables = ['precipitation', 'temperature']
+        self.input_fname = '/home/ftei-dsw/data/weather-gan/datasets/monthly_gfdl_historical.nc'
+        self.target_fname = '/home/ftei-dsw/data/weather-gan/datasets/daily_gfdl_historical.nc'
         self.batch_names = ['input', 'target']
         
         self.splits = {
@@ -49,8 +50,8 @@ class DataModule(pl.LightningDataModule):
 
     def get_dataset(self, stage: str, fname: str, variables):
         preproc = ProcessDataset(fname,
-                        variables=variables,
-                        time_slice=self.splits[stage])
+                        variables,
+                        self.splits[stage])
         
         preproc.run()
         dataset = preproc.get()
@@ -66,16 +67,22 @@ class DataModule(pl.LightningDataModule):
         if stage == 'fit' or stage is None:
             input_dataset = self.get_dataset('train', self.input_fname, self.input_variables)
             target_dataset = self.get_dataset('train', self.target_fname, self.target_variables)
+
             self.train_loader = DaliLoader(input_dataset,
                                            target_dataset,
+                                           self.input_variables,
+                                           self.target_variables,
                                            self.train_batch_size,
                                            self.batch_names,
                                            shuffle=True)
             
             input_dataset = self.get_dataset('valid', self.input_fname, self.input_variables)
             target_dataset = self.get_dataset('valid', self.target_fname, self.target_variables)
+
             self.valid_loader = DaliLoader(input_dataset,
                                            target_dataset,
+                                           self.input_variables,
+                                           self.target_variables,
                                            self.test_batch_size,
                                            self.batch_names,
                                            shuffle=True)
@@ -83,8 +90,11 @@ class DataModule(pl.LightningDataModule):
         if stage == 'test':
             input_dataset = self.get_dataset('test', self.input_fname, self.input_variables)
             target_dataset = self.get_dataset('test', self.target_fname, self.target_variables)
+
             self.test_loader = DaliLoader(input_dataset,
                                            target_dataset,
+                                           self.input_variables,
+                                           self.target_variables,
                                            self.test_batch_size,
                                            self.batch_names,
                                            shuffle=True)
@@ -109,8 +119,8 @@ class ProcessDataset():
     """
     def __init__(self,
                  fname: str,
-                 variables=['precipitation', 'precipitation_2'],
-                 time_slice=['2000', '2001'],
+                 variables,
+                 time_slice,
                  chunk_size=10):
     
         
@@ -140,13 +150,30 @@ class ProcessDataset():
 class DaliLoader():
     """ Dataloader used in the PyTorch training loop """
 
-    def __init__(self, input_dataset, target_dataset, batch_size, output_map, shuffle=True):
-        
+    def __init__(self,
+                 input_dataset,
+                 target_dataset,
+                 input_variables,
+                 target_variables,
+                 batch_size,
+                 output_map,
+                 shuffle=True):
         
         self.length = len(input_dataset.time)
-        
-        input_source = ExternalInputIterator(input_dataset, batch_size, shuffle=shuffle)
-        target_source = ExternalInputIterator(target_dataset, batch_size, shuffle=shuffle)
+
+        input_source = ExternalInputIterator(input_dataset,
+                                             input_variables,
+                                             batch_size,
+                                             self.length,
+                                             shuffle=shuffle)
+
+        target_source = ExternalInputIterator(target_dataset,
+                                              target_variables,
+                                              batch_size,
+                                              self.length,
+                                              time_axis=target_dataset.time,
+                                              #time_axis=None,
+                                              shuffle=shuffle)
 
         pipe = pipeline(input_source,
                         target_source,
@@ -175,16 +202,22 @@ class ExternalInputIterator(object):
     
     def __init__(self,
                  dataset: xr.Dataset,
+                 variables: list,
                  batch_size: int,
-                 shuffle=True
+                 length: int,
+                 shuffle=True,
+                 time_axis=None
                 ):
         
         self.batch_size = batch_size
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.variables = ['precipitation', 'precipitation_2']
-        self.length = len(dataset.time)
+        self.variables = variables
+        self.length = length
         self.dataset = dataset
         self.shuffle = shuffle
+        self.time_axis = time_axis
+        #fixing the seed to have synchronous draws from both (input and target) pipeline
+        np.random.seed(seed=42) 
 
     def __iter__(self):
         self.i = 0
@@ -197,9 +230,17 @@ class ExternalInputIterator(object):
             channel = []
             
             for var in self.variables:
-                image = self.dataset[var].isel(time=self.i)
+
+                if self.time_axis is None:
+                    image = self.dataset[var].isel(time=self.i)
+                    image_tensor = torch.from_numpy(image.values)
+                else:
+                    date = random_date(self.time_axis, self.i)
+                    image = self.dataset[var].sel(time=date)
+                    image_tensor = torch.from_numpy(image.values).squeeze()
+
                 #image = torch.from_numpy(image.values).to(self.device)
-                image_tensor = torch.from_numpy(image.values)
+                #image tensor should have shape (H,W)
                 channel.append(image_tensor)
                 
             channel_stacked = torch.stack(channel, dim=-1)
@@ -211,7 +252,8 @@ class ExternalInputIterator(object):
             else:
                 self.i = (self.i + 1) % self.n
             
-        sample = torch.concat(batch)
+        #sample = torch.concat(batch)
+        sample = torch.cat(batch)
         #sample = sample.unsqueeze(-1) # create a channel
         sample = sample.to(self.device)
         
