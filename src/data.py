@@ -159,19 +159,19 @@ class DaliLoader():
                  output_map,
                  shuffle=True):
         
-        self.length = len(input_dataset.time)
+        self.length = len(target_dataset.time)
 
         input_source = ExternalInputIterator(input_dataset,
                                              input_variables,
                                              batch_size,
                                              self.length,
+                                             time_axis=target_dataset.time,
                                              shuffle=shuffle)
 
         target_source = ExternalInputIterator(target_dataset,
                                               target_variables,
                                               batch_size,
                                               self.length,
-                                              time_axis=target_dataset.time,
                                               #time_axis=None,
                                               shuffle=shuffle)
 
@@ -234,7 +234,7 @@ class ExternalInputIterator(object):
                     image = self.dataset[var].isel(time=self.i)
                     image_tensor = torch.from_numpy(image.values)
                 else:
-                    date = random_date(self.time_axis, self.i)
+                    date = month_from_daily_date(self.time_axis, self.i)
                     image = self.dataset[var].sel(time=date)
                     image_tensor = torch.from_numpy(image.values).squeeze()
 
@@ -256,7 +256,14 @@ class ExternalInputIterator(object):
         return sample
 
 
-def random_date(monthly_times: xr.DataArray, index) -> str:
+def month_from_daily_date(daily_times, index) -> str:
+    month = str(daily_times.isel(time=index)['time.month'].values) 
+    year = str(daily_times.isel(time=index)['time.year'].values)
+    date_str = f'{year}-{month.zfill(2)}'
+    return date_str
+
+
+def day_from_monthly_date(monthly_times: xr.DataArray, index) -> str:
     month = str(monthly_times.isel(time=index)['time.month'].values) 
     year = str(monthly_times.isel(time=index)['time.year'].values)
     random_day = str(np.random.randint(1,30,size=1)[0])
