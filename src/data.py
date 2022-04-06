@@ -241,7 +241,7 @@ class ExternalInputIterator(object):
                 #image tensor should have shape (H,W)
                 channel.append(image_tensor)
                 
-            channel_stacked = torch.stack(channel, dim=-1)
+            channel_stacked = torch.stack(channel, dim=0)
             channel_stacked = channel_stacked.unsqueeze(0)
             batch.append(channel_stacked)
             

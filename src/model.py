@@ -65,6 +65,7 @@ class Generator(nn.Module):
 
     def __init__(self,
                  in_channels: int = 1,
+                 latent_dim: int = 0,
                  out_channels: int = 64,
                  apply_dp: bool = True,
                  num_resblocks = 3,
@@ -91,7 +92,7 @@ class Generator(nn.Module):
 
         f = 1
 
-        conv = nn.Conv2d(in_channels = in_channels, out_channels = out_channels, kernel_size = 7, stride = 1)
+        conv = nn.Conv2d(in_channels = in_channels+latent_dim, out_channels = out_channels, kernel_size = 7, stride = 1)
         self.layers = [nn.ReflectionPad2d(3), conv, nn.InstanceNorm2d(out_channels), nn.ReLU(True)]
 
         for i in range(num_downsampling):
@@ -186,7 +187,6 @@ class Discriminator(nn.Module):
         self.layers += [conv]
 
         self.net = nn.Sequential(*self.layers)
-
 
     def forward(self, x):
         out = self.net(x)

@@ -29,8 +29,9 @@ class WeatherGenerator(LightningModule):
         self.n_critic = 5
 
         # networks
-        self.generator = Generator(in_channels=2+self.latent_dim,
+        self.generator = Generator(in_channels=2,
                                    out_channels=64, #hidden state
+                                   latent_dim = self.latent_dim,
                                    apply_dp=True,
                                    num_resblocks=3,
                                    num_downsampling=2)
@@ -39,9 +40,7 @@ class WeatherGenerator(LightningModule):
                                            out_channels=32,
                                            num_layers=2)
 
-        self.validation_z = torch.randn(8, self.latent_dim)
-
-        self.example_input_array = torch.zeros(2, self.latent_dim)
+        #self.validation_z = torch.randn(8, self.latent_dim)
 
 
     def forward(self, z):
@@ -72,11 +71,13 @@ class WeatherGenerator(LightningModule):
 
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-        imgs, _ = batch
+        input = batch[0]['input']
+        target = batch[0]['target']
 
         # sample noise
-        z = torch.randn(imgs.shape[0], self.latent_dim)
-        z = z.type_as(imgs)
+        z = torch.randn(input.shape[0], self.latent_dim, input.shape[2],  input.shape[3])
+        z = z.type_as(input)
+        input = torch.cat([input, z], dim=1)
 
         lambda_gp = 10
 
@@ -84,19 +85,22 @@ class WeatherGenerator(LightningModule):
         if optimizer_idx == 0:
 
             # generate images
-            self.generated_imgs = self(z)
+            self.generated_imgs = self(input)
 
             # log sampled images
-            sample_imgs = self.generated_imgs[:6]
-            grid = torchvision.utils.make_grid(sample_imgs)
-            self.logger.experiment.add_image('generated_images', grid, 0)
+            sample_imgs = self.generated_imgs[0,0]
+            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
+            self.logger.experiment.add_image('generated_images', grid, self.current_epoch, dataformats = "CHW")
 
             # ground truth result (ie: all fake)
             # put on GPU because we created this tensor inside training_loop
-            valid = torch.ones(imgs.size(0), 1)
-            valid = valid.type_as(imgs)
+            valid = torch.ones(input.size(0), 1)
+            valid = valid.type_as(input)
 
-            g_loss = -torch.mean(self.discriminator(self(z)))
+            generated_fields = self(input)
+            print(generated_fields.shape)
+
+            g_loss = -torch.mean(self.discriminator(generated_fields))
             tqdm_dict = {'g_loss': g_loss}
             output = OrderedDict({
                 'loss': g_loss,
@@ -108,16 +112,17 @@ class WeatherGenerator(LightningModule):
         # train discriminator
         # Measure discriminator's ability to classify real from generated samples
         elif optimizer_idx == 1:
-            fake_imgs = self(z)
+            fake_imgs = self(input)
 
             # Real images
-            real_validity = self.discriminator(imgs)
+            real_validity = self.discriminator(target)
             # Fake images
             fake_validity = self.discriminator(fake_imgs)
             # Gradient penalty
-            gradient_penalty = self.compute_gradient_penalty(imgs.data, fake_imgs.data)
+            #gradient_penalty = self.compute_gradient_penalty(imgs.data, fake_imgs.data)
             # Adversarial loss
-            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
+            #d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
+            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp 
 
             tqdm_dict = {'d_loss': d_loss}
             output = OrderedDict({
@@ -142,10 +147,11 @@ class WeatherGenerator(LightningModule):
         )
 
 
-    def on_epoch_end(self):
-        z = self.validation_z.to(self.device)
+    #def on_epoch_end(self):
 
-        # log sampled images
-        sample_imgs = self(z)
-        grid = torchvision.utils.make_grid(sample_imgs)
-        self.logger.experiment.add_image('generated_images', grid, self.current_epoch)
+    #    z = torch.randn(imgs.shape[0], imgs.shape[1],imgs.shape[2],  self.latent_dim)
+
+    #    # log sampled images
+    #    sample_imgs = self(z)
+    #    grid = torchvision.utils.make_grid(sample_imgs)
+    #    self.logger.experiment.add_image('generated_images', grid, self.current_epoch)
