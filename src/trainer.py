@@ -1,21 +1,16 @@
-
 import os
-
 from collections import OrderedDict
-
 import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
-
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
-
 from pytorch_lightning.core import LightningModule
 
+from src.model import Generator, Discriminator
 
-
-class WGANGP(LightningModule):
+class WeatherGenerator(LightningModule):
 
     def __init__(self,
                  latent_dim: int = 100,
@@ -26,16 +21,23 @@ class WGANGP(LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.latent_dim = latent_dim
+        self.latent_dim = latent_dim # noise dim
         self.lr = lr
-        self.b1 = b1
+        self.b1 = b1 # beta for optimizer
         self.b2 = b2
         self.batch_size = batch_size
+        self.n_critic = 5
 
         # networks
-        mnist_shape = (1, 28, 28)
-        self.generator = Generator(latent_dim=self.latent_dim, img_shape=mnist_shape)
-        self.discriminator = Discriminator(img_shape=mnist_shape)
+        self.generator = Generator(in_channels=2+self.latent_dim,
+                                   out_channels=64, #hidden state
+                                   apply_dp=True,
+                                   num_resblocks=3,
+                                   num_downsampling=2)
+
+        self.discriminator = Discriminator(in_channels=2,
+                                           out_channels=32,
+                                           num_layers=2)
 
         self.validation_z = torch.randn(8, self.latent_dim)
 
@@ -127,7 +129,6 @@ class WGANGP(LightningModule):
 
 
     def configure_optimizers(self):
-        n_critic = 5
 
         lr = self.lr
         b1 = self.b1
@@ -137,16 +138,9 @@ class WGANGP(LightningModule):
         opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=lr, betas=(b1, b2))
         return (
             {'optimizer': opt_g, 'frequency': 1},
-            {'optimizer': opt_d, 'frequency': n_critic}
+            {'optimizer': opt_d, 'frequency': self.n_critic}
         )
 
-    def train_dataloader(self):
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-        dataset = MNIST(os.getcwd(), train=True, download=True, transform=transform)
-        return DataLoader(dataset, batch_size=self.batch_size)
 
     def on_epoch_end(self):
         z = self.validation_z.to(self.device)
