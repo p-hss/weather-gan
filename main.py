@@ -1,5 +1,4 @@
 from argparse import ArgumentParser, Namespace
-from src.trainer import WGANGP, Trainer
 from src.data import DataModule
 from src.trainer import WeatherGenerator
 from pytorch_lightning.loggers import TensorBoardLogger
