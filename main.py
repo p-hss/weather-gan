@@ -1,16 +1,34 @@
 from argparse import ArgumentParser, Namespace
 from src.trainer import WGANGP, Trainer
 from src.data import DataModule
+from src.trainer import WeatherGenerator
+from pytorch_lightning.loggers import TensorBoardLogger
+
 from pytorch_lightning.trainer import Trainer
+from src.utils import get_version
+from src.configuration import Config
+
 
 def main(args: Namespace) -> None:
-    model = WGANGP(**vars(args))
+    config = Config()
+    training(config)
 
-    data = DataModule()
+
+def training(config):
+
+    tb_logger = TensorBoardLogger(config.tensorboard_path,
+                                  name=config.model_name,
+                                  default_hp_metric=False,
+                                  version = get_version())
+    
+    model = WeatherGenerator(config)
+                             
+    data = DataModule(config)
     data.setup('fit')
-
-    trainer = Trainer(gpus=args.gpus)
-
+    
+    trainer = Trainer(gpus=1,
+                     logger=tb_logger)
+    
     trainer.fit(model, data)
 
 
