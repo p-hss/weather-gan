@@ -16,35 +16,27 @@ class DataModule(pl.LightningDataModule):
     """Main class to prepare dataloader for training. """
 
     def __init__(self,
-                 #config,
-                 num_workers=0,
-                 train_batch_size: int = 4,
-                 test_batch_size: int = 64):
+                 config,
+                 num_workers=0):
 
-        """
-        Parameters:
-            train_batch_size: Training Batch Size
-            test_batch_size: Test Batch Size
-        """
 
         super().__init__()
 
-        #self.config = config
+        self.config = config
         #self.num_workers = num_workers
-        self.train_batch_size = train_batch_size
-        self.test_batch_size = test_batch_size
+        self.train_batch_size = config.train_batch_size
+        self.test_batch_size =  config.test_batch_size
         # order of variable lists matters!
         self.input_variables = ['precipitation', 'temperature']
         self.target_variables = ['precipitation', 'temperature']
-        self.input_fname = '/home/ftei-dsw/data/weather-gan/datasets/monthly_gfdl_historical.nc'
-        self.target_fname = '/home/ftei-dsw/data/weather-gan/datasets/daily_gfdl_historical.nc'
+        self.input_fname = config.input_fname
+        self.target_fname = config.target_fname
         self.batch_names = ['input', 'target']
         
         self.splits = {
-        
-                'train': ['2000', '2001'],
-                'valid': ['2002', '2003'],
-                'test': ['2004', '2005']
+                "train": [str(config.train_start), str(config.train_end)],
+                "valid": [str(config.valid_start), str(config.valid_end)],
+                "test":  [str(config.test_start), str(config.test_end)]
         }
         
 
@@ -159,7 +151,7 @@ class DaliLoader():
                  output_map,
                  shuffle=True):
         
-        self.length = len(target_dataset.time)
+        self.length = int(len(target_dataset.time)/batch_size)
 
         input_source = ExternalInputIterator(input_dataset,
                                              input_variables,

@@ -15,34 +15,29 @@ from src.model import Generator, Discriminator
 class WeatherGenerator(LightningModule):
 
     def __init__(self,
-                 latent_dim: int = 100,
-                 lr: float = 0.0002,
-                 b1: float = 0.5,
-                 b2: float = 0.999,
-                 batch_size: int = 64, **kwargs):
+                 config):
+
         super().__init__()
+
         self.save_hyperparameters()
 
-        self.latent_dim = latent_dim # noise dim
-        self.lr = lr
-        self.b1 = b1 # beta for optimizer
-        self.b2 = b2
-        self.batch_size = batch_size
-        self.n_critic = 5
+        self.latent_dim = config.latent_dim # noise dim
+        self.lr = config.lr
+        self.b1 = config.beta1 # beta for optimizer
+        self.b2 = config.beta2
+        self.n_critic = config.n_critic
 
         # networks
-        self.generator = Generator(in_channels=2,
-                                   out_channels=64, #hidden state
-                                   latent_dim = self.latent_dim,
-                                   apply_dp=True,
-                                   num_resblocks=3,
-                                   num_downsampling=2)
+        self.generator = Generator(in_channels=config.num_variables,
+                                   out_channels=config.generator_channels, 
+                                   latent_dim=config.latent_dim,
+                                   apply_dp=config.apply_dropout,
+                                   num_resblocks=config.generator_num_resblocks,
+                                   num_downsampling=config.generator_num_downsampling)
 
-        self.discriminator = Discriminator(in_channels=2,
-                                           out_channels=32,
-                                           num_layers=2)
-
-        #self.validation_z = torch.randn(8, self.latent_dim)
+        self.discriminator = Discriminator(in_channels=config.num_variables,
+                                           out_channels=config.discriminator_channels,
+                                           num_layers=config.discriminator_num_layers)
 
 
     def forward(self, z):
@@ -124,7 +119,11 @@ class WeatherGenerator(LightningModule):
             # log sampled images
             sample_imgs = self.generated_imgs[0,0]
             grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
-            self.logger.experiment.add_image('generated_images', grid, self.current_epoch, dataformats = "CHW")
+            self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch, dataformats = "CHW")
+
+            sample_imgs = self.generated_imgs[0,1]
+            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
+            self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch, dataformats = "CHW")
 
             # ground truth result (ie: all fake)
             # put on GPU because we created this tensor inside training_loop
@@ -140,6 +139,11 @@ class WeatherGenerator(LightningModule):
                 'progress_bar': tqdm_dict,
                 'log': tqdm_dict
             })
+            self.log("g_loss", g_loss.detach(),
+                     on_step = True,
+                     on_epoch = True,
+                     prog_bar = True,
+                     logger = True)
             return output
 
         # train discriminator
@@ -162,6 +166,12 @@ class WeatherGenerator(LightningModule):
                 'progress_bar': tqdm_dict,
                 'log': tqdm_dict
             })
+
+            self.log("d_loss", d_loss.detach(),
+                     on_step = True,
+                     on_epoch = True,
+                     prog_bar = True,
+                     logger = True)
             return output
 
 
