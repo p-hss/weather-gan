@@ -12,7 +12,7 @@ class Config:
     input_fname: str = f'{scratch_path}/datasets/monthly_gfdl_historical.nc'
     target_fname: str = f'{scratch_path}/datasets/daily_gfdl_historical.nc'
 
-    train_start: int = 1950
+    train_start: int = 1970
     train_end: int = 1986
     valid_start: int = 2000
     valid_end: int = 2014

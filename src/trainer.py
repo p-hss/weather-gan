@@ -25,6 +25,7 @@ def training(config, enable_profiler=False):
 
 
     trainer = Trainer(gpus=1,
+                     max_epochs = config.epochs, 
                      logger=tb_logger,
                      profiler=profiler)
     

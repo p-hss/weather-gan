@@ -116,7 +116,8 @@ class ProcessDataset():
                  chunk_size=10):
     
         
-        self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
+        #self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
+        self.ds = xr.open_dataset(fname, cache=True)
         self.variables = variables
         self.time_slice = time_slice
         self.data = None
@@ -169,8 +170,9 @@ class DaliLoader():
         pipe = pipeline(input_source,
                         target_source,
                         batch_size=batch_size,
-                        num_threads=12,
+                        num_threads=5,
                         device_id=0,
+                        prefetch_queue_depth=2,
                         exec_async=False,
                         exec_pipelined=False)
         
@@ -265,7 +267,8 @@ def pipeline(input_source, target_source):
     """ Pipelines for input and target """
     inputs = fn.external_source(source=input_source,
                                 layout="CHW",
-                                device="gpu")
+                                #parallel=True,
+                                device="cpu")
 
     # add transforms below:
     inputs = fn.python_function(inputs, function=Transforms().log)
@@ -274,7 +277,8 @@ def pipeline(input_source, target_source):
     
     targets = fn.external_source(source=target_source,
                                  layout="CHW",
-                                 device="gpu")
+                                 #parallel=True,
+                                 device="cpu")
     # add transforms below:
     targets = fn.python_function(targets, function=Transforms().log)
     targets = fn.python_function(targets, function=Transforms().normalize)
