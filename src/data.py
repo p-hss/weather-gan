@@ -149,18 +149,25 @@ class DaliLoader():
                  target_variables,
                  batch_size,
                  output_map,
-                 shuffle=True):
+                 shuffle=True,
+                 prefetch_queue_depth=4,
+                 num_threads=4,
+                 ):
         
-        self.length = int(len(target_dataset.time)/batch_size)
+        #self.length = int(len(target_dataset.time)/batch_size)
+        self.length = int(len(target_dataset.time))
+        self.batch_size = batch_size
 
-        input_source = ExternalInputIterator(input_dataset,
+        #input_source = ExternalInputIterator(input_dataset,
+        input_source = ExternalInputCallable(input_dataset,
                                              input_variables,
                                              batch_size,
                                              self.length,
                                              time_axis=target_dataset.time,
                                              shuffle=shuffle)
 
-        target_source = ExternalInputIterator(target_dataset,
+        #target_source = ExternalInputIterator(target_dataset,
+        target_source = ExternalInputCallable(target_dataset,
                                               target_variables,
                                               batch_size,
                                               self.length,
@@ -170,16 +177,16 @@ class DaliLoader():
         pipe = pipeline(input_source,
                         target_source,
                         batch_size=batch_size,
-                        num_threads=5,
+                        num_threads=num_threads,
                         device_id=0,
-                        prefetch_queue_depth=2,
+                        prefetch_queue_depth=prefetch_queue_depth,
                         exec_async=False,
                         exec_pipelined=False)
         
         self.dali_iterator = DALIGenericIterator(pipe, output_map, auto_reset=True) 
         
     def __len__(self):
-        return int(self.length)
+        return int(self.length)//self.batch_size
     
     def __iter__(self):
         return self.dali_iterator.__iter__()
@@ -202,7 +209,7 @@ class ExternalInputIterator(object):
                 ):
         
         self.batch_size = batch_size
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.variables = variables
         self.length = length
         self.dataset = dataset
@@ -225,17 +232,21 @@ class ExternalInputIterator(object):
 
                 if self.time_axis is None:
                     image = self.dataset[var].isel(time=self.i)
-                    image_tensor = torch.from_numpy(image.values)
+                    #image_tensor = torch.from_numpy(image.values)
+                    image_tensor = image.values
                 else:
                     date = month_from_daily_date(self.time_axis, self.i)
                     image = self.dataset[var].sel(time=date)
-                    image_tensor = torch.from_numpy(image.values).squeeze()
+                    #image_tensor = torch.from_numpy(image.values).squeeze()
+                    image_tensor = image.values.squeeze()
 
                 #image tensor should have shape (H,W)
                 channel.append(image_tensor)
                 
-            channel_stacked = torch.stack(channel, dim=0)
-            channel_stacked = channel_stacked.unsqueeze(0)
+            #channel_stacked = torch.stack(channel, dim=0)
+            channel_stacked = np.stack(channel, axis=0)
+            #channel_stacked = channel_stacked.unsqueeze(0)
+            channel_stacked = np.expand_dims(channel_stacked, axis=0)
             batch.append(channel_stacked)
             
             if self.shuffle is True:
@@ -243,8 +254,66 @@ class ExternalInputIterator(object):
             else:
                 self.i = (self.i + 1) % self.n
             
-        sample = torch.cat(batch)
+        #sample = torch.cat(batch)
+        sample = np.concatenate(batch)
         return sample
+
+
+
+class ExternalInputCallable:
+    def __init__(self, 
+                 dataset: xr.Dataset,
+                 variables: list,
+                 batch_size: int,
+                 length: int,
+                 shuffle=True,
+                 time_axis=None
+                ):
+
+        self.batch_size = batch_size
+        #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.variables = variables
+        self.length = length
+        self.dataset = dataset
+        self.shuffle = shuffle
+        self.time_axis = time_axis
+        #fixing the seed to have synchronous draws from both (input and target) pipeline
+        np.random.seed(seed=42) 
+
+        self.full_iterations = length // batch_size
+
+    def __call__(self, sample_info):
+        sample_idx = sample_info.idx_in_epoch
+        if sample_info.iteration >= self.full_iterations:
+            # Indicate end of the epoch
+            raise StopIteration()
+
+        channel = []
+            
+        for var in self.variables:
+
+            if self.time_axis is None:
+                image = self.dataset[var].isel(time=sample_idx)
+                #image_tensor = torch.from_numpy(image.values)
+                image_tensor = image.values
+            else:
+                date = month_from_daily_date(self.time_axis, sample_idx)
+                image = self.dataset[var].sel(time=date)
+                #image_tensor = torch.from_numpy(image.values).squeeze()
+                image_tensor = image.values.squeeze()
+
+            #image tensor should have shape (H,W)
+            channel.append(image_tensor)
+            
+        #channel_stacked = torch.stack(channel, dim=0)
+        channel_stacked = np.stack(channel, axis=0)
+        #channel_stacked = channel_stacked.unsqueeze(0)
+        #channel_stacked = np.expand_dims(channel_stacked, axis=0)
+            
+            
+        #sample = torch.cat(batch)
+        #sample = np.concatenate(batch)
+        return channel_stacked
 
 
 def month_from_daily_date(daily_times, index) -> str:
@@ -267,8 +336,9 @@ def pipeline(input_source, target_source):
     """ Pipelines for input and target """
     inputs = fn.external_source(source=input_source,
                                 layout="CHW",
+                                batch=False,
                                 #parallel=True,
-                                device="cpu")
+                                device="gpu")
 
     # add transforms below:
     inputs = fn.python_function(inputs, function=Transforms().log)
@@ -277,8 +347,9 @@ def pipeline(input_source, target_source):
     
     targets = fn.external_source(source=target_source,
                                  layout="CHW",
+                                 batch=False,
                                  #parallel=True,
-                                 device="cpu")
+                                 device="gpu")
     # add transforms below:
     targets = fn.python_function(targets, function=Transforms().log)
     targets = fn.python_function(targets, function=Transforms().normalize)
@@ -324,7 +395,6 @@ class Transforms():
     
     def inverse_normalize(self, x):
         x = (x + 1)/2
-
         x[0,:,:] = x[0,:,:]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
         x[1,:,:] = x[1,:,:]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
         x = x * (self.max_ref - self.min_ref) + self.min_ref
