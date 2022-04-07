@@ -1,31 +1,57 @@
-import numpy as np
 import torch.nn as nn
+from collections import OrderedDict
+import torch
+import torchvision
+from pytorch_lightning.core import LightningModule
+from torch.autograd import grad as torch_grad
+from torch.autograd import Variable
 
-class MLPGenerator(nn.Module):
-    def __init__(self, latent_dim, img_shape):
-        super(Generator, self).__init__()
-        self.img_shape = img_shape
 
-        def block(in_feat, out_feat, normalize=True):
-            layers = [nn.Linear(in_feat, out_feat)]
-            if normalize:
-                layers.append(nn.BatchNorm1d(out_feat, 0.8))
-            layers.append(nn.LeakyReLU(0.2, inplace=True))
-            return layers
+class Discriminator(nn.Module):
 
-        self.model = nn.Sequential(
-            *block(latent_dim, 128, normalize=False),
-            *block(128, 256),
-            *block(256, 512),
-            *block(512, 1024),
-            nn.Linear(1024, int(np.prod(img_shape))),
-            nn.Tanh()
-        )
+    def __init__(self,
+                 in_channels: int = 1,
+                 out_channels: int = 64,
+                 num_layers: int = 3):
 
-    def forward(self, z):
-        img = self.model(z)
-        img = img.view(img.shape[0], *self.img_shape)
-        return img
+        """
+                                    Discriminator Architecture!
+        C64 - C128 - C256 - C512, where Ck denote a Convolution-InstanceNorm-LeakyReLU layer with k filters
+        """
+
+        """
+        Parameters:
+            in_channels:    Number of input channels
+            out_channels:   Number of output channels
+            num_layers:     Number of layers in the 70*70 Patch Discriminator
+        """
+
+        super().__init__()
+        in_f  = 1
+        out_f = 2
+
+        conv = nn.Conv2d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1)
+        self.layers = [conv, nn.LeakyReLU(0.2, True)]
+
+        for idx in range(1, num_layers):
+            conv = nn.Conv2d(out_channels * in_f, out_channels * out_f, kernel_size = 4, stride = 2, padding = 1)
+            self.layers += [conv, nn.InstanceNorm2d(out_channels * out_f), nn.LeakyReLU(0.2, True)]
+            in_f   = out_f
+            out_f *= 2
+
+        out_f = min(2 ** num_layers, 8)
+        conv = nn.Conv2d(out_channels * in_f,  out_channels * out_f, kernel_size = 4, stride = 1, padding = 1)
+        self.layers += [conv, nn.InstanceNorm2d(out_channels * out_f), nn.LeakyReLU(0.2, True)]
+
+        conv = nn.Conv2d(out_channels * out_f, out_channels = 1, kernel_size = 4, stride = 1, padding = 1)
+        self.layers += [conv]
+
+        self.net = nn.Sequential(*self.layers)
+
+    def forward(self, x):
+        out = self.net(x)
+        out = out.view(out.size(0), -1)
+        return out 
 
 
 class ResBlock(nn.Module):
@@ -121,6 +147,196 @@ class Generator(nn.Module):
 
         return x 
 
+class WeatherGenerator(LightningModule):
+
+    def __init__(self,
+                 config):
+
+        super().__init__()
+
+        self.save_hyperparameters()
+
+        self.latent_dim = config.latent_dim # noise dim
+        self.lr = config.lr
+        self.b1 = config.beta1 # beta for optimizer
+        self.b2 = config.beta2
+        self.n_critic = config.n_critic
+
+        # networks
+        self.generator = Generator(in_channels=config.num_variables,
+                                   out_channels=config.generator_channels, 
+                                   latent_dim=config.latent_dim,
+                                   apply_dp=config.apply_dropout,
+                                   num_resblocks=config.generator_num_resblocks,
+                                   num_downsampling=config.generator_num_downsampling)
+
+        self.discriminator = Discriminator(in_channels=config.num_variables,
+                                           out_channels=config.discriminator_channels,
+                                           num_layers=config.discriminator_num_layers)
+
+
+    def forward(self, z):
+        return self.generator(z)
+
+    def gradient_penalty(self, real_data, generated_data):
+        batch_size = real_data.size()[0]
+
+        # Calculate interpolation
+        alpha = torch.rand(batch_size, 1, 1, 1).to(self.device)
+        alpha = alpha.expand_as(real_data)
+
+        interpolated = alpha * real_data.data + (1 - alpha) * generated_data.data
+        interpolated = Variable(interpolated, requires_grad=True)
+
+
+        # Calculate probability of interpolated examples
+        prob_interpolated = self.discriminator(interpolated)
+
+        # Calculate gradients of probabilities with respect to examples
+        gradients = torch_grad(outputs=prob_interpolated, inputs=interpolated,
+                               grad_outputs=torch.ones(prob_interpolated.size()).to(self.device),
+                               create_graph=True, retain_graph=True)[0]
+
+        # Gradients have shape (batch_size, num_channels, img_width, img_height),
+        # so flatten to easily take norm per example in batch
+        gradients = gradients.view(batch_size, -1)
+        #self.losses['gradient_norm'].append(gradients.norm(2, dim=1).mean().data[0])
+
+        # Derivatives of the gradient close to 0 can cause problems because of
+        # the square root, so manually calculate norm and add epsilon
+        gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
+
+        # Return gradient penalty
+        return ((gradients_norm - 1) ** 2).mean()    
+
+    #def compute_gradient_penalty(self, real_samples, fake_samples):
+    #    """Calculates the gradient penalty loss for WGAN GP"""
+    #    print(real_samples.shape, fake_samples.shape)
+
+    #    # Random weight term for interpolation between real and fake samples
+    #    alpha = torch.Tensor(np.random.random(real_samples.shape)).to(self.device)
+    #    # Get random interpolation between real and fake samples
+    #    interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
+    #    interpolates = interpolates.to(self.device)
+    #    d_interpolates = self.discriminator(interpolates)
+    #    fake = torch.Tensor(real_samples.shape).fill_(1.0).to(self.device)
+    #    # Get gradient w.r.t. interpolates
+    #    gradients = torch.autograd.grad(
+    #        outputs=d_interpolates,
+    #        inputs=interpolates,
+    #        grad_outputs=fake,
+    #        create_graph=True,
+    #        retain_graph=True,
+    #        only_inputs=True,
+    #    )[0]
+    #    gradients = gradients.view(gradients.size(0), -1).to(self.device)
+    #    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+    #    return gradient_penalty
+
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        input = batch[0]['input']
+        target = batch[0]['target']
+
+        # sample noise
+        z = torch.randn(input.shape[0], self.latent_dim, input.shape[2],  input.shape[3])
+        z = z.type_as(input)
+        input = torch.cat([input, z], dim=1)
+
+        lambda_gp = 10
+
+        # train generator
+        if optimizer_idx == 0:
+
+            # generate images
+            self.generated_imgs = self(input)
+
+            # log sampled images
+            sample_imgs = self.generated_imgs[0,0]
+            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
+            self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch, dataformats = "CHW")
+
+            sample_imgs = self.generated_imgs[0,1]
+            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
+            self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch, dataformats = "CHW")
+
+            # ground truth result (ie: all fake)
+            # put on GPU because we created this tensor inside training_loop
+            valid = torch.ones(input.size(0), 1)
+            valid = valid.type_as(input)
+
+            generated_fields = self(input)
+
+            g_loss = -torch.mean(self.discriminator(generated_fields))
+            tqdm_dict = {'g_loss': g_loss}
+            output = OrderedDict({
+                'loss': g_loss,
+                'progress_bar': tqdm_dict,
+                'log': tqdm_dict
+            })
+            self.log("g_loss", g_loss.detach(),
+                     on_step = True,
+                     on_epoch = True,
+                     prog_bar = True,
+                     logger = True)
+            return output
+
+        # train discriminator
+        # Measure discriminator's ability to classify real from generated samples
+        elif optimizer_idx == 1:
+            fake_imgs = self(input)
+
+            # Real images
+            real_validity = self.discriminator(target)
+            # Fake images
+            fake_validity = self.discriminator(fake_imgs)
+            # Gradient penalty
+            gradient_penalty = self.gradient_penalty(target.data, fake_imgs.data)
+            # Adversarial loss
+            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
+
+            tqdm_dict = {'d_loss': d_loss}
+            output = OrderedDict({
+                'loss': d_loss,
+                'progress_bar': tqdm_dict,
+                'log': tqdm_dict
+            })
+
+            self.log("d_loss", d_loss.detach(),
+                     on_step = True,
+                     on_epoch = True,
+                     prog_bar = True,
+                     logger = True)
+            return output
+
+
+    def configure_optimizers(self):
+
+        lr = self.lr
+        b1 = self.b1
+        b2 = self.b2
+
+        opt_g = torch.optim.Adam(self.generator.parameters(), lr=lr, betas=(b1, b2))
+        opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=lr, betas=(b1, b2))
+        return (
+            {'optimizer': opt_g, 'frequency': 1},
+            {'optimizer': opt_d, 'frequency': self.n_critic}
+        )
+
+
+    #def on_epoch_end(self):
+
+    #    z = torch.randn(imgs.shape[0], imgs.shape[1],imgs.shape[2],  self.latent_dim)
+
+    #    # log sampled images
+    #    sample_imgs = self(z)
+    #    grid = torchvision.utils.make_grid(sample_imgs)
+    #    self.logger.experiment.add_image('generated_images', grid, self.current_epoch)
+
+
+
+
+
 class ConvGenerator(nn.Module):
     def __init__(self, no_of_channels=1, input_dim=100, gen_dim=32):
       super(ConvGenerator, self).__init__()
@@ -147,69 +363,7 @@ class ConvGenerator(nn.Module):
       return output
 
 
-class Discriminator(nn.Module):
 
-    def __init__(self,
-                 in_channels: int = 1,
-                 out_channels: int = 64,
-                 num_layers: int = 3):
-
-        """
-                                    Discriminator Architecture!
-        C64 - C128 - C256 - C512, where Ck denote a Convolution-InstanceNorm-LeakyReLU layer with k filters
-        """
-
-        """
-        Parameters:
-            in_channels:    Number of input channels
-            out_channels:   Number of output channels
-            num_layers:     Number of layers in the 70*70 Patch Discriminator
-        """
-
-        super().__init__()
-        in_f  = 1
-        out_f = 2
-
-        conv = nn.Conv2d(in_channels, out_channels, kernel_size = 4, stride = 2, padding = 1)
-        self.layers = [conv, nn.LeakyReLU(0.2, True)]
-
-        for idx in range(1, num_layers):
-            conv = nn.Conv2d(out_channels * in_f, out_channels * out_f, kernel_size = 4, stride = 2, padding = 1)
-            self.layers += [conv, nn.InstanceNorm2d(out_channels * out_f), nn.LeakyReLU(0.2, True)]
-            in_f   = out_f
-            out_f *= 2
-
-        out_f = min(2 ** num_layers, 8)
-        conv = nn.Conv2d(out_channels * in_f,  out_channels * out_f, kernel_size = 4, stride = 1, padding = 1)
-        self.layers += [conv, nn.InstanceNorm2d(out_channels * out_f), nn.LeakyReLU(0.2, True)]
-
-        conv = nn.Conv2d(out_channels * out_f, out_channels = 1, kernel_size = 4, stride = 1, padding = 1)
-        self.layers += [conv]
-
-        self.net = nn.Sequential(*self.layers)
-
-    def forward(self, x):
-        out = self.net(x)
-        out = out.view(out.size(0), -1)
-        return out 
-
-
-class MLPDiscriminator(nn.Module):
-    def __init__(self, img_shape):
-        super(Discriminator, self).__init__()
-
-        self.model = nn.Sequential(
-            nn.Linear(int(np.prod(img_shape)), 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 1),
-        )
-
-    def forward(self, img):
-        img_flat = img.view(img.shape[0], -1)
-        validity = self.model(img_flat)
-        return validity
 
 
 class ConvDiscriminator(nn.Module):

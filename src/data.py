@@ -138,7 +138,6 @@ class ProcessDataset():
         return len(self.data.time)
 
 
-
 class DaliLoader():
     """ Dataloader used in the PyTorch training loop """
 
@@ -243,8 +242,6 @@ class ExternalInputIterator(object):
                 self.i = (self.i + 1) % self.n
             
         sample = torch.cat(batch)
-        sample = sample.to(self.device)
-        
         return sample
 
 
@@ -300,32 +297,32 @@ class Transforms():
         self.scale_factor = 100
         
     def crop(self, x):
-        return x[:,:-1]
+        return x[:,:-1,:-72]
 
     def abs(self, x):
         return np.abs(x)
     
     def log(self, x):
         """applies log transform to one variable only """
-        x[:,:,0] = self.log_function(x[:,:,0] + self.epsilon) - self.log_function(self.epsilon)
+        x[0,:,:] = self.log_function(x[0,:,:] + self.epsilon) - self.log_function(self.epsilon)
         return  x    
 
     def inverse_log(self, x):
-        x[:,:,0] = self.exp_function(x[:,:,0] + self.log_function(self.epsilon)) - self.epsilon
+        x[0,:,:] = self.exp_function(x[0,:,:] + self.log_function(self.epsilon)) - self.epsilon
         return x
 
     def normalize(self, x):
         """ normalize to [-1, 1] """
-        x[:,:,0] = (x[:,:,0] - self.log_precipitation_min_ref)/(self.log_precipitation_max_ref - self.log_precipitation_min_ref)
-        x[:,:,1] = (x[:,:,1] - self.temperature_min_ref)/(self.temperature_max_ref - self.temperature_min_ref)
+        x[0,:,:] = (x[0,:,:] - self.log_precipitation_min_ref)/(self.log_precipitation_max_ref - self.log_precipitation_min_ref)
+        x[1,:,:] = (x[1,:,:] - self.temperature_min_ref)/(self.temperature_max_ref - self.temperature_min_ref)
         x = x*2 - 1
         return x
     
     def inverse_normalize(self, x):
         x = (x + 1)/2
 
-        x[:,:,0] = x[:,:,0]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
-        x[:,:,1] = x[:,:,1]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
+        x[0,:,:] = x[0,:,:]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
+        x[1,:,:] = x[1,:,:]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
         x = x * (self.max_ref - self.min_ref) + self.min_ref
         return x 
     

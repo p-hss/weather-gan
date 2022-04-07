@@ -12,7 +12,7 @@ class Config:
     input_fname: str = f'{scratch_path}/datasets/monthly_gfdl_historical.nc'
     target_fname: str = f'{scratch_path}/datasets/daily_gfdl_historical.nc'
 
-    train_start: int = 1850
+    train_start: int = 1950
     train_end: int = 1986
     valid_start: int = 2000
     valid_end: int = 2014
@@ -22,7 +22,7 @@ class Config:
     model_name: str = 'weather-gan'
     
     num_variables: int = 2
-    epochs: int = 10
+    epochs: int = 1
     train_batch_size: int = 32
     test_batch_size: int = 64
     lr: float = 0.0002
