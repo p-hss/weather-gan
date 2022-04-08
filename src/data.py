@@ -401,7 +401,6 @@ class Transforms():
         x = (x + 1)/2
         x[0,:,:] = x[0,:,:]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
         x[1,:,:] = x[1,:,:]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
-        x = x * (self.max_ref - self.min_ref) + self.min_ref
         return x 
     
     def test(self):

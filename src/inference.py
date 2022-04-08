@@ -2,10 +2,13 @@ import os
 import torch
 import xarray as xr
 import numpy as np
+#from tqdm import tqdm
+from tqdm import tqdm_notebook as tqdm
 
 from src.model import WeatherGenerator
 from src.utils import config_from_file
-from src.data import DataModule
+from src.data import DataModule, Transforms
+from src.plots import plot_sample
 
 
 class Inference():
@@ -21,6 +24,7 @@ class Inference():
         self.checkpoint_path = checkpoint_path
         self.config_path = '/home/ftei-dsw/data/weather-gan/config-files/'
         self.config = self.load_config()
+        self.replace_missing_configuration()
         self.results_path = self.config.results_path
 
         self.train_start = str(self.config.train_start)
@@ -34,12 +38,19 @@ class Inference():
         self.model_output = None
         self.dataset = None
         self.epoch_index = epoch_index
+        self.transforms = Transforms()
 
 
         self.max_num_inference_steps = max_num_inference_steps
         self.tst_batch_sz = 64
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+
+    def load_config(self):
+        self.uuid = self.get_uuid_from_path(self.checkpoint_path)
+        config = config_from_file(f'{self.config_path}config_model_{self.uuid}.json')
+        return config
+
 
     def replace_missing_configuration(self):
         """ adding parameters that have been added to config later,
@@ -51,41 +62,7 @@ class Inference():
             self.config.discriminator_num_layers = 3 
 
 
-    def get_files(self, path: str):
-        if os.path.isfile(path):
-            files = []
-            files.append(path) 
-        else:
-            files = os.listdir(path)
-            for i, f in enumerate(files):
-                files[i] = os.path.join(path, f) 
-        return files 
-
-
-    def load_config(self):
-        self.uuid = self.get_uuid_from_path(self.checkpoint_path)
-        config = config_from_file(f'{self.config_path}config_model_{self.uuid}.json')
-        return config
-
-
-    def get_uuid_from_path(self, path: str):
-        import re
-        uuid4hex = re.compile('[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', re.I)
-        uuid = uuid4hex.search(path).group(0)
-        return uuid
-
-        
-    def load_model(self, path):
-        self.replace_missing_configuration()
-        model = WeatherGenerator(self.config).load_from_checkpoint(checkpoint_path=path)
-        model.freeze()
-        generator = model.generator
-        self.generator = generator.to(self.device)
-
-
     def run(self):
-        
-        self.config = self.load_config()
         
         files = self.get_files(self.checkpoint_path)
 
@@ -100,13 +77,36 @@ class Inference():
             print('')
 
             self.load_model(fname)
-
-            #self.run_inference(fname)
-            #self.read_test_data()
-            #self.get_plots()
-           
+            self.execute_inference()
+            self.apply_inverse_transforms()
             
-        return self.generator
+        return self.model_output
+
+
+    def get_files(self, path: str):
+        if os.path.isfile(path):
+            files = []
+            files.append(path) 
+        else:
+            files = os.listdir(path)
+            for i, f in enumerate(files):
+                files[i] = os.path.join(path, f) 
+        return files 
+
+
+    def get_uuid_from_path(self, path: str):
+        import re
+        uuid4hex = re.compile('[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', re.I)
+        uuid = uuid4hex.search(path).group(0)
+        return uuid
+
+        
+    def load_model(self, path):
+        model = WeatherGenerator(self.config).load_from_checkpoint(checkpoint_path=path)
+        model.freeze()
+        generator = model.generator
+        self.generator = generator.to(self.device)
+
 
     def get_dataloader(self):
         datamodule = DataModule(self.config)
@@ -114,18 +114,19 @@ class Inference():
         dataloader = datamodule.test_dataloader()
         return dataloader
 
-    def compute(self, dataloader=None):
-        """ Use B (ESM) -> A (ERA5) generator for inference """
+
+    def execute_inference(self, dataloader=None):
         if dataloader is None:
-            test_data = self.get_dataloader()
-        else:
-            test_data = dataloader
+            dataloader = self.get_dataloader()
 
         data = []
         print("Start inference:")
-        for idx, sample in enumerate(tqdm(test_data)):
-            sample = sample['B'].to(self.device)
-            yhat = self.model(sample)
+        for idx, sample in enumerate(tqdm(dataloader)):
+            input = sample[0]['input'].to(self.device)
+            z = torch.randn(input.shape[0], self.config.latent_dim, input.shape[2],  input.shape[3])
+            z = z.type_as(input)
+            input = torch.cat([input, z], dim=1)
+            yhat = self.generator(input)
 
             data.append(yhat.squeeze().cpu())
             if self.max_num_inference_steps is not None:
@@ -133,6 +134,20 @@ class Inference():
                     break
         self.model_output = torch.cat(data)
 
+    def get_target(self):
+        dataloader = self.get_dataloader()
+        target = []
+        for i, batch in enumerate(tqdm(dataloader)):
+            target.append(batch[0]['target'])
+        target = torch.cat(target)
+        return target
+
+    def apply_inverse_transforms(self):
+        for i in range(len(self.model_output)):
+            data = self.model_output[i]
+            data = self.transforms.inverse_normalize(data)
+            data = self.transforms.inverse_log(data)
+            self.model_output[i] = data
     
     def get_netcdf_result(self):
         
