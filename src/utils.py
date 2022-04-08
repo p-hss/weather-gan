@@ -58,3 +58,18 @@ def save_config(config, version):
     fname = f'{config.config_path}config_model_{version[len(version)-uuid_legth:]}.json'
     with open(fname, 'w') as file:
         file.write(json.dumps(vars(config))) 
+
+
+def config_from_file(file_name):
+    import json
+    with open(file_name) as json_file:
+        data = json.load(json_file)
+    config = ClassFromDict(data)
+    return config
+
+
+class ClassFromDict:
+    def __init__(self, dictionary):
+        for k, v in dictionary.items():
+            setattr(self, k, v)
+        setattr(self, 'flag', None)

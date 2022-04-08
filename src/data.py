@@ -89,6 +89,7 @@ class DataModule(pl.LightningDataModule):
                                            self.target_variables,
                                            self.test_batch_size,
                                            self.batch_names,
+                                           stage='test',
                                            shuffle=True)
 
 
@@ -115,7 +116,6 @@ class ProcessDataset():
                  time_slice,
                  chunk_size=10):
     
-        
         #self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
         self.ds = xr.open_dataset(fname, cache=True)
         self.variables = variables
@@ -124,7 +124,6 @@ class ProcessDataset():
         
         
     def run(self):
-        
         data = []
         for var in self.variables:
             data.append(self.ds[var])
@@ -134,6 +133,7 @@ class ProcessDataset():
         
     def get(self):
         return self.data
+
     
     def get_length(self) -> int:
         return len(self.data.time)
@@ -152,11 +152,13 @@ class DaliLoader():
                  shuffle=True,
                  prefetch_queue_depth=4,
                  num_threads=4,
+                 stage=None,
                  ):
         
         #self.length = int(len(target_dataset.time)/batch_size)
         self.length = int(len(target_dataset.time))
         self.batch_size = batch_size
+        self.stage = stage
 
         #input_source = ExternalInputIterator(input_dataset,
         input_source = ExternalInputCallable(input_dataset,
@@ -176,6 +178,7 @@ class DaliLoader():
 
         pipe = pipeline(input_source,
                         target_source,
+                        stage=stage,
                         batch_size=batch_size,
                         num_threads=num_threads,
                         device_id=0,
@@ -332,7 +335,7 @@ def day_from_monthly_date(monthly_times: xr.DataArray, index) -> str:
 
 
 @pipeline_def
-def pipeline(input_source, target_source):
+def pipeline(input_source, target_source, stage=None):
     """ Pipelines for input and target """
     inputs = fn.external_source(source=input_source,
                                 layout="CHW",
@@ -351,8 +354,9 @@ def pipeline(input_source, target_source):
                                  #parallel=True,
                                  device="gpu")
     # add transforms below:
-    targets = fn.python_function(targets, function=Transforms().log)
-    targets = fn.python_function(targets, function=Transforms().normalize)
+    if stage != 'test':
+        targets = fn.python_function(targets, function=Transforms().log)
+        targets = fn.python_function(targets, function=Transforms().normalize)
     targets = fn.python_function(targets, function=Transforms().crop)
     return inputs, targets
 

@@ -1,50 +1,119 @@
-import xarray as xr
+import os
 import torch
-import numpy as nmp
+import xarray as xr
+import numpy as np
 
 from src.model import WeatherGenerator
+from src.utils import config_from_file
+from src.data import DataModule
+
 
 class Inference():
 
     """ Execute model on test data and return output as NetCDF. """
     
     def __init__(self,
-                 config,
-                 constrain=False,
-                 projection=False,
-                 projection_path=None,
-                 max_num_inference_steps=None):
+                 checkpoint_path,
+                 max_num_inference_steps=None,
+                 epoch_index=None
+                 ):
         
+        self.checkpoint_path = checkpoint_path
+        self.config_path = '/home/ftei-dsw/data/weather-gan/config-files/'
+        self.config = self.load_config()
+        self.results_path = self.config.results_path
 
-        self.config = config
-        scratch_path: str = '/p/tmp/hess/scratch/cmip-gan'
-        self.results_path = config.results_path
-
-        self.train_start = str(config.train_start)
-        self.train_end = str(config.train_end)
-        self.test_start = str(config.test_start)
-        self.test_end = str(config.test_end)
+        self.train_start = str(self.config.train_start)
+        self.train_end = str(self.config.train_end)
+        self.test_start = str(self.config.test_start)
+        self.test_end = str(self.config.test_end)
 
         self.model = None
+        self.generator = None
+        self.discriminator = None
         self.model_output = None
         self.dataset = None
+        self.epoch_index = epoch_index
 
-        self.transforms = config.transforms
+
         self.max_num_inference_steps = max_num_inference_steps
         self.tst_batch_sz = 64
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        
-        
-    def get_config(self, config_path):
-        
-    def load_model(self, checkpoint_path):
     
-        model = WeatherGenerator(self.config).load_from_checkpoint(checkpoint_path=checkpoint_path)
+
+    def replace_missing_configuration(self):
+        """ adding parameters that have been added to config later,
+            to ensure compatibility.
+        """
+        if hasattr(self.config, 'n_critic') is False:
+            self.config.n_critic = 5 
+        if hasattr(self.config, 'discriminator_num_layers') is False:
+            self.config.discriminator_num_layers = 3 
+
+
+    def get_files(self, path: str):
+        if os.path.isfile(path):
+            files = []
+            files.append(path) 
+        else:
+            files = os.listdir(path)
+            for i, f in enumerate(files):
+                files[i] = os.path.join(path, f) 
+        return files 
+
+
+    def load_config(self):
+        self.uuid = self.get_uuid_from_path(self.checkpoint_path)
+        config = config_from_file(f'{self.config_path}config_model_{self.uuid}.json')
+        return config
+
+
+    def get_uuid_from_path(self, path: str):
+        import re
+        uuid4hex = re.compile('[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', re.I)
+        uuid = uuid4hex.search(path).group(0)
+        return uuid
+
+        
+    def load_model(self, path):
+        self.replace_missing_configuration()
+        model = WeatherGenerator(self.config).load_from_checkpoint(checkpoint_path=path)
         model.freeze()
-        self.model = model.to(self.device)
-        self.model = ConstrainedGenerator(self.model.g_B2A, constrain=self.constrain)
+        generator = model.generator
+        self.generator = generator.to(self.device)
+
+
+    def run(self):
+        
+        self.config = self.load_config()
+        
+        files = self.get_files(self.checkpoint_path)
+
+        if self.epoch_index is not None:
+            files = [files[self.epoch_index-1]]
+
+        for i, fname in enumerate(files):
+            self.checkpoint_idx = i+1
+            self.num_checkpoints = len(files)
+            print(f'Checkpoint {self.checkpoint_idx} / {self.num_checkpoints}:')
+            print(fname)
+            print('')
+
+            self.load_model(fname)
+
+            #self.run_inference(fname)
+            #self.read_test_data()
+            #self.get_plots()
+           
             
+        return self.generator
+
+    def get_dataloader(self):
+        datamodule = DataModule(self.config)
+        datamodule.setup("test")
+        dataloader = datamodule.test_dataloader()
+        return dataloader
+
     def compute(self, dataloader=None):
         """ Use B (ESM) -> A (ERA5) generator for inference """
         if dataloader is None:
@@ -53,7 +122,6 @@ class Inference():
             test_data = dataloader
 
         data = []
-
         print("Start inference:")
         for idx, sample in enumerate(tqdm(test_data)):
             sample = sample['B'].to(self.device)
@@ -63,16 +131,7 @@ class Inference():
             if self.max_num_inference_steps is not None:
                 if idx > self.max_num_inference_steps - 1:
                     break
-            
         self.model_output = torch.cat(data)
-
-
-    def test(self):
-        dataset = CycleDataset('test', self.config)
-        test_data = dataset[0]
-        sample = test_data['A'][0]
-        data = self.inv_transform(sample)
-        print(data.min(), data.max())
 
     
     def get_netcdf_result(self):
@@ -111,3 +170,4 @@ class Inference():
         self.gan_dataset = gan_dataset.transpose('time', 'latitude', 'longitude')
 
         return self.gan_dataset
+
