@@ -1,14 +1,6 @@
 from uuid import uuid1
 from datetime import datetime
-import os
-import time
-
-def get_version():
-    model_id = str(uuid1())
-    #date = datetime.now().date().strftime("%Y_%m_%d")
-    date = datetime.now().time().strftime("%Hh_%Mm_%Ss")
-    version = f'{date}/{model_id}'
-    return version
+from pathlib import Path
 
 
 def show_config(config):
@@ -37,3 +29,32 @@ def show_config(config):
     print(f'discriminator channels: {config.discriminator_channels}') 
     print(f'discriminator num layers: {config.discriminator_num_layers}') 
     print(f'num discriminator steps: {config.n_critic}') 
+
+
+def get_version():
+    model_id = str(uuid1())
+    #date = datetime.now().date().strftime("%Y_%m_%d")
+    date = datetime.now().time().strftime("%Hh_%Mm_%Ss")
+    version = f'{date}/{model_id}'
+    return version
+
+
+def get_checkpoint_path(config, version):
+
+    model_name = config.model_name    
+    checkpoint_path = config.checkpoint_path
+    uuid_legth = 36
+    date_legth = 10
+
+    path = f'{checkpoint_path[:-1]}/{model_name}/{version[:date_legth]}/{version[len(version)-uuid_legth:]}'
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+    return path
+
+
+def save_config(config, version):
+    import json
+    uuid_legth = 36
+    fname = f'{config.config_path}config_model_{version[len(version)-uuid_legth:]}.json'
+    with open(fname, 'w') as file:
+        file.write(json.dumps(vars(config))) 

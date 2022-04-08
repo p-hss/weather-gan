@@ -147,6 +147,7 @@ class Generator(nn.Module):
 
         return x 
 
+
 class WeatherGenerator(LightningModule):
 
     def __init__(self,
@@ -209,30 +210,6 @@ class WeatherGenerator(LightningModule):
         # Return gradient penalty
         return ((gradients_norm - 1) ** 2).mean()    
 
-    #def compute_gradient_penalty(self, real_samples, fake_samples):
-    #    """Calculates the gradient penalty loss for WGAN GP"""
-    #    print(real_samples.shape, fake_samples.shape)
-
-    #    # Random weight term for interpolation between real and fake samples
-    #    alpha = torch.Tensor(np.random.random(real_samples.shape)).to(self.device)
-    #    # Get random interpolation between real and fake samples
-    #    interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
-    #    interpolates = interpolates.to(self.device)
-    #    d_interpolates = self.discriminator(interpolates)
-    #    fake = torch.Tensor(real_samples.shape).fill_(1.0).to(self.device)
-    #    # Get gradient w.r.t. interpolates
-    #    gradients = torch.autograd.grad(
-    #        outputs=d_interpolates,
-    #        inputs=interpolates,
-    #        grad_outputs=fake,
-    #        create_graph=True,
-    #        retain_graph=True,
-    #        only_inputs=True,
-    #    )[0]
-    #    gradients = gradients.view(gradients.size(0), -1).to(self.device)
-    #    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-    #    return gradient_penalty
-
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         input = batch[0]['input']
@@ -252,13 +229,18 @@ class WeatherGenerator(LightningModule):
             self.generated_imgs = self(input)
 
             # log sampled images
-            sample_imgs = self.generated_imgs[0,0]
-            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
-            self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch, dataformats = "CHW")
-
-            sample_imgs = self.generated_imgs[0,1]
-            grid = torchvision.utils.make_grid(sample_imgs,  nrow=1)
-            self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch, dataformats = "CHW")
+            grid = torchvision.utils.make_grid(self.generated_imgs[0,0].unsqueeze(0), nrow=1)
+            self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch,
+                                             dataformats="CHW")
+            grid = torchvision.utils.make_grid(target[1,0], nrow=1)
+            self.logger.experiment.add_image('target_precipitation', grid, self.current_epoch,
+                                             dataformats="CHW")
+            grid = torchvision.utils.make_grid(self.generated_imgs[0,1], nrow=1)
+            self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch,
+                                             dataformats="CHW")
+            grid = torchvision.utils.make_grid(target[0,1], nrow=1)
+            self.logger.experiment.add_image('target_temperature', grid, self.current_epoch,
+                                             dataformats="CHW")
 
             # ground truth result (ie: all fake)
             # put on GPU because we created this tensor inside training_loop
@@ -322,16 +304,6 @@ class WeatherGenerator(LightningModule):
             {'optimizer': opt_g, 'frequency': 1},
             {'optimizer': opt_d, 'frequency': self.n_critic}
         )
-
-
-    #def on_epoch_end(self):
-
-    #    z = torch.randn(imgs.shape[0], imgs.shape[1],imgs.shape[2],  self.latent_dim)
-
-    #    # log sampled images
-    #    sample_imgs = self(z)
-    #    grid = torchvision.utils.make_grid(sample_imgs)
-    #    self.logger.experiment.add_image('generated_images', grid, self.current_epoch)
 
 
 

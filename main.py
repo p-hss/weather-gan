@@ -1,34 +1,11 @@
 from argparse import ArgumentParser, Namespace
-from src.data import DataModule
-from src.trainer import WeatherGenerator
-from pytorch_lightning.loggers import TensorBoardLogger
 
-from pytorch_lightning.trainer import Trainer
-from src.utils import get_version
 from src.configuration import Config
-
+from src.trainer import training
 
 def main(args: Namespace) -> None:
     config = Config()
     training(config)
-
-
-def training(config):
-
-    tb_logger = TensorBoardLogger(config.tensorboard_path,
-                                  name=config.model_name,
-                                  default_hp_metric=False,
-                                  version = get_version())
-    
-    model = WeatherGenerator(config)
-                             
-    data = DataModule(config)
-    data.setup('fit')
-    
-    trainer = Trainer(gpus=1,
-                     logger=tb_logger)
-    
-    trainer.fit(model, data)
 
 
 if __name__ == '__main__':
