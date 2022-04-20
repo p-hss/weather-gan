@@ -6,6 +6,7 @@ from pytorch_lightning.trainer import Trainer
 from src.utils import get_version, save_config, show_config, get_checkpoint_path
 from src.configuration import Config
 from src.callbacks import get_callbacks
+from src.dataloader import PyTorchDataModule
 
 def training(config, enable_profiler=False):
     """ Main training function """
@@ -27,7 +28,7 @@ def training(config, enable_profiler=False):
     
     model = WeatherGenerator(config)
                              
-    data = DataModule(config)
+    data = PyTorchDataModule(config)
     data.setup('fit')
 
     if enable_profiler:

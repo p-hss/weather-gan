@@ -5,6 +5,8 @@ from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
 import torch
 
+import random
+
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 from nvidia.dali import pipeline_def, fn
 from dask.diagnostics import ProgressBar
@@ -90,7 +92,7 @@ class DataModule(pl.LightningDataModule):
                                            self.test_batch_size,
                                            self.batch_names,
                                            stage='test',
-                                           shuffle=True)
+                                           shuffle=False)
 
 
     def train_dataloader(self):
@@ -117,7 +119,8 @@ class ProcessDataset():
                  chunk_size=10):
     
         #self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
-        self.ds = xr.open_dataset(fname, cache=True)
+        #self.ds = xr.open_dataset(fname).load()
+        self.ds = xr.open_dataset(fname)
         self.variables = variables
         self.time_slice = time_slice
         self.data = None
@@ -150,31 +153,35 @@ class DaliLoader():
                  batch_size,
                  output_map,
                  shuffle=True,
-                 prefetch_queue_depth=4,
-                 num_threads=4,
+                 prefetch_queue_depth=2,
+                 num_threads=2,
                  stage=None,
                  ):
         
         #self.length = int(len(target_dataset.time)/batch_size)
+        print(f'number of threads {num_threads}')
         self.length = int(len(target_dataset.time))
         self.batch_size = batch_size
         self.stage = stage
+        self.indices = self.get_indices(self.length, shuffle=shuffle)
 
         #input_source = ExternalInputIterator(input_dataset,
         input_source = ExternalInputCallable(input_dataset,
                                              input_variables,
                                              batch_size,
                                              self.length,
-                                             time_axis=target_dataset.time,
-                                             shuffle=shuffle)
+                                             self.indices,
+                                             time_axis=target_dataset.time
+                                             )
 
         #target_source = ExternalInputIterator(target_dataset,
         target_source = ExternalInputCallable(target_dataset,
                                               target_variables,
                                               batch_size,
                                               self.length,
-                                              #time_axis=None,
-                                              shuffle=shuffle)
+                                              self.indices,
+                                              #time_axis=None
+                                              )
 
         pipe = pipeline(input_source,
                         target_source,
@@ -182,9 +189,13 @@ class DaliLoader():
                         batch_size=batch_size,
                         num_threads=num_threads,
                         device_id=0,
+                        #py_num_workers=4, 
+                        #py_start_method="spawn",
                         prefetch_queue_depth=prefetch_queue_depth,
                         exec_async=False,
                         exec_pipelined=False)
+
+        pipe.start_py_workers()
         
         self.dali_iterator = DALIGenericIterator(pipe, output_map, auto_reset=True) 
         
@@ -193,6 +204,14 @@ class DaliLoader():
     
     def __iter__(self):
         return self.dali_iterator.__iter__()
+
+
+    def get_indices(self, num_samples, shuffle=True):
+        if shuffle:
+            indices = random.sample(range(num_samples), num_samples)
+        else:
+            indices = list(np.arange(num_samples))
+        return indices
 
 
 class ExternalInputIterator(object):
@@ -235,20 +254,16 @@ class ExternalInputIterator(object):
 
                 if self.time_axis is None:
                     image = self.dataset[var].isel(time=self.i)
-                    #image_tensor = torch.from_numpy(image.values)
                     image_tensor = image.values
                 else:
                     date = month_from_daily_date(self.time_axis, self.i)
                     image = self.dataset[var].sel(time=date)
-                    #image_tensor = torch.from_numpy(image.values).squeeze()
                     image_tensor = image.values.squeeze()
 
                 #image tensor should have shape (H,W)
                 channel.append(image_tensor)
                 
-            #channel_stacked = torch.stack(channel, dim=0)
             channel_stacked = np.stack(channel, axis=0)
-            #channel_stacked = channel_stacked.unsqueeze(0)
             channel_stacked = np.expand_dims(channel_stacked, axis=0)
             batch.append(channel_stacked)
             
@@ -257,28 +272,29 @@ class ExternalInputIterator(object):
             else:
                 self.i = (self.i + 1) % self.n
             
-        #sample = torch.cat(batch)
         sample = np.concatenate(batch)
         return sample
 
 
 
 class ExternalInputCallable:
+    """ Input source to the Pipeline, called by fn.external_source. """
+
     def __init__(self, 
                  dataset: xr.Dataset,
                  variables: list,
                  batch_size: int,
                  length: int,
-                 shuffle=True,
+                 indices: list,
                  time_axis=None
                 ):
 
-        self.batch_size = batch_size
         #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.variables = variables
-        self.length = length
         self.dataset = dataset
-        self.shuffle = shuffle
+        self.variables = variables
+        self.batch_size = batch_size
+        self.length = length
+        self.indices = indices 
         self.time_axis = time_axis
         #fixing the seed to have synchronous draws from both (input and target) pipeline
         np.random.seed(seed=42) 
@@ -286,7 +302,7 @@ class ExternalInputCallable:
         self.full_iterations = length // batch_size
 
     def __call__(self, sample_info):
-        sample_idx = sample_info.idx_in_epoch
+        sample_idx = self.indices[sample_info.idx_in_epoch]
         if sample_info.iteration >= self.full_iterations:
             # Indicate end of the epoch
             raise StopIteration()
@@ -297,29 +313,22 @@ class ExternalInputCallable:
 
             if self.time_axis is None:
                 image = self.dataset[var].isel(time=sample_idx)
-                #image_tensor = torch.from_numpy(image.values)
                 image_tensor = image.values
             else:
                 date = month_from_daily_date(self.time_axis, sample_idx)
                 image = self.dataset[var].sel(time=date)
-                #image_tensor = torch.from_numpy(image.values).squeeze()
                 image_tensor = image.values.squeeze()
 
             #image tensor should have shape (H,W)
             channel.append(image_tensor)
             
-        #channel_stacked = torch.stack(channel, dim=0)
         channel_stacked = np.stack(channel, axis=0)
-        #channel_stacked = channel_stacked.unsqueeze(0)
-        #channel_stacked = np.expand_dims(channel_stacked, axis=0)
             
-            
-        #sample = torch.cat(batch)
-        #sample = np.concatenate(batch)
         return channel_stacked
 
 
 def month_from_daily_date(daily_times, index) -> str:
+    ''' returns the month for a given date '''
     month = str(daily_times.isel(time=index)['time.month'].values) 
     year = str(daily_times.isel(time=index)['time.year'].values)
     date_str = f'{year}-{month.zfill(2)}'
@@ -327,6 +336,7 @@ def month_from_daily_date(daily_times, index) -> str:
 
 
 def day_from_monthly_date(monthly_times: xr.DataArray, index) -> str:
+    ''' returns a random day for a given month'''
     month = str(monthly_times.isel(time=index)['time.month'].values) 
     year = str(monthly_times.isel(time=index)['time.year'].values)
     random_day = str(np.random.randint(1,30,size=1)[0])
@@ -341,7 +351,7 @@ def pipeline(input_source, target_source, stage=None):
                                 layout="CHW",
                                 batch=False,
                                 #parallel=True,
-                                device="gpu")
+                                device="cpu")
 
     # add transforms below:
     inputs = fn.python_function(inputs, function=Transforms().log)
@@ -352,7 +362,7 @@ def pipeline(input_source, target_source, stage=None):
                                  layout="CHW",
                                  batch=False,
                                  #parallel=True,
-                                 device="gpu")
+                                 device="cpu")
     # add transforms below:
     if stage != 'test':
         targets = fn.python_function(targets, function=Transforms().log)

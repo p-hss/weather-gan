@@ -212,8 +212,11 @@ class WeatherGenerator(LightningModule):
 
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-        input = batch[0]['input']
-        target = batch[0]['target']
+        #input = batch[0]['input']
+        #target = batch[0]['target']
+
+        input = batch[0]
+        target = batch[1]
 
         # sample noise
         z = torch.randn(input.shape[0], self.latent_dim, input.shape[2],  input.shape[3])
