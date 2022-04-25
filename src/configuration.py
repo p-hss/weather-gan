@@ -22,7 +22,7 @@ class Config:
     model_name: str = 'weather-gan'
     
     num_variables: int = 2
-    epochs: int = 150
+    epochs: int = 250
     train_batch_size: int = 32
     test_batch_size: int = 64
     lr: float = 0.0002
