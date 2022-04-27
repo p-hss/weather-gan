@@ -266,7 +266,7 @@ class WeatherGenerator(LightningModule):
                      logger = True)
             return output
 
-    def validation_step(self, batch, batch_idx, optimizer_idx):
+    def validation_step(self, batch, batch_idx):
 
         input = batch[0]
         target = batch[1]
@@ -300,17 +300,18 @@ class WeatherGenerator(LightningModule):
                  prog_bar = True,
                  logger = True)
 
-        real_validity = self.discriminator(target)
-        fake_validity = self.discriminator(generated_fields)
-        gradient_penalty = self.gradient_penalty(target.data, generated_fields.data)
-        d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) \
-                 + self.lambda_gp * gradient_penalty
+        #fake_imgs = self(input)
+        #real_validity = self.discriminator(target)
+        #fake_validity = self.discriminator(fake_imgs)
+        #gradient_penalty = self.gradient_penalty(target.data, fake_imgs.data)
+        #d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) \
+        #         + self.lambda_gp * gradient_penalty
 
-        self.log("d_val_loss", d_loss.detach(),
-                 on_step = True,
-                 on_epoch = True,
-                 prog_bar = True,
-                 logger = True)
+        #self.log("d_val_loss", d_loss.detach(),
+        #         on_step = True,
+        #         on_epoch = True,
+        #         prog_bar = True,
+        #         logger = True)
 
 
     def configure_optimizers(self):

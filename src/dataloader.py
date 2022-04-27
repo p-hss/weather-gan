@@ -66,6 +66,7 @@ class PyTorchDataModule(pl.LightningDataModule):
             target_dataset = self.get_dataset('train', self.target_fname, self.target_variables)
 
             dataset = DaskDataset(stage,
+                                  self.config,
                                   target_dataset,
                                   input_dataset,
                                   self.target_variables,
@@ -82,6 +83,7 @@ class PyTorchDataModule(pl.LightningDataModule):
             target_dataset = self.get_dataset('valid', self.target_fname, self.target_variables)
 
             dataset = DaskDataset(stage,
+                                  self.config,
                                   target_dataset,
                                   input_dataset,
                                   self.target_variables,
@@ -99,6 +101,7 @@ class PyTorchDataModule(pl.LightningDataModule):
             target_dataset = self.get_dataset('test', self.target_fname, self.target_variables)
 
             dataset = DaskDataset(stage,
+                                  self.config,
                                   target_dataset,
                                   input_dataset,
                                   self.target_variables,
@@ -116,7 +119,7 @@ class PyTorchDataModule(pl.LightningDataModule):
         return self.train_loader
 
 
-    def valid_dataloader(self):
+    def val_dataloader(self):
         return self.valid_loader
 
     
@@ -133,13 +136,9 @@ class ProcessDataset():
                  fname: str,
                  variables,
                  time_slice,
-                 chunk_size=10):
+                 chunk_size=1):
     
-        #self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
-        #self.ds = xr.open_dataset(fname).load()
-        print("loading datasets..")
-        self.ds = xr.open_dataset(fname).load()
-        print("finished")
+        self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
         self.variables = variables
         self.time_slice = time_slice
         self.data = None
@@ -151,6 +150,9 @@ class ProcessDataset():
             data.append(self.ds[var])
         self.data = xr.merge(data)
         self.data = self.data.sel(time=slice(self.time_slice[0], self.time_slice[1]))
+        print("loading datasets..")
+        self.data = self.data.load()
+        print("finished")
         
         
     def get(self):
@@ -165,6 +167,7 @@ class DaskDataset(torch.utils.data.Dataset):
     
     def __init__(self,
                  stage,
+                 config,
                  target_dataset,
                  input_dataset,
                  target_variables,
@@ -177,6 +180,7 @@ class DaskDataset(torch.utils.data.Dataset):
         self.input_variables = input_variables
         self.stage = stage
         self.time_axis = target_dataset.time
+        self.transforms = Transforms(config)
 
 
     def pack_input_batch(self, index):
@@ -212,16 +216,16 @@ class DaskDataset(torch.utils.data.Dataset):
         inputs = self.pack_input_batch(index)
 
         # add transforms below:
-        inputs = Transforms().log(inputs)
-        inputs = Transforms().normalize(inputs)
-        inputs = Transforms().crop(inputs)
+        inputs = self.transforms.log(inputs)
+        inputs = self.transforms.normalize(inputs)
+        inputs = self.transforms.crop(inputs)
     
         targets = self.pack_target_batch(index)
         # add transforms below:
         if self.stage != 'test':
-            targets = Transforms().log(targets)
-            targets = Transforms().normalize(targets)
-        targets = Transforms().crop(targets)
+            targets = self.transforms.log(targets)
+            targets = self.transforms.normalize(targets)
+        targets = self.transforms.crop(targets)
         
         return torch.from_numpy(inputs), torch.from_numpy(targets)
 
@@ -231,17 +235,11 @@ class DaskDataset(torch.utils.data.Dataset):
 
 class Transforms():
     
-    def __init__(self, min_ref=0, max_ref=4):
-        self.epsilon = 0.0001
-        self.temperature_min_ref = 190
-        self.temperature_max_ref = 320
+    def __init__(self, config, min_ref=0, max_ref=4):
 
-        self.log_precipitation_min_ref = 0 
-        self.log_precipitation_max_ref = 4
-
+        self.config = config
         self.log_function = np.log
         self.exp_function = np.exp
-        self.scale_factor = 100
         
     def crop(self, x):
         return x[:,:-1,:-72]
@@ -251,24 +249,28 @@ class Transforms():
     
     def log(self, x):
         """applies log transform to one variable only """
-        x[0,:,:] = self.log_function(x[0,:,:] + self.epsilon) - self.log_function(self.epsilon)
+        x[0,:,:] = self.log_function(x[0,:,:] + self.config.epsilon) - self.log_function(self.config.epsilon)
         return  x    
 
     def inverse_log(self, x):
-        x[0,:,:] = self.exp_function(x[0,:,:] + self.log_function(self.epsilon)) - self.epsilon
+        x[0,:,:] = self.exp_function(x[0,:,:] + self.log_function(self.config.epsilon)) - self.config.epsilon
         return x
 
     def normalize(self, x):
         """ normalize to [-1, 1] """
-        x[0,:,:] = (x[0,:,:] - self.log_precipitation_min_ref)/(self.log_precipitation_max_ref - self.log_precipitation_min_ref)
-        x[1,:,:] = (x[1,:,:] - self.temperature_min_ref)/(self.temperature_max_ref - self.temperature_min_ref)
+        x[0,:,:] = (x[0,:,:] - self.config.log_precipitation_min_ref)/(self.config.log_precipitation_max_ref - self.config.log_precipitation_min_ref)
+        x[1,:,:] = (x[1,:,:] - self.config.temperature_min_ref)/(self.config.temperature_max_ref - self.config.temperature_min_ref)
         x = x*2 - 1
         return x
     
     def inverse_normalize(self, x):
         x = (x + 1)/2
-        x[0,:,:] = x[0,:,:]*(self.log_precipitation_max_ref - self.log_precipitation_min_ref) + self.log_precipitation_min_ref
-        x[1,:,:] = x[1,:,:]*(self.temperature_max_ref - self.temperature_min_ref) + self.temperature_min_ref
+        x[0,:,:] = x[0,:,:]*(self.log_precipitation_max_ref 
+                             - self.config.log_precipitation_min_ref) \
+                            + self.config.log_precipitation_min_ref
+        x[1,:,:] = x[1,:,:]*(self.temperature_max_ref 
+                             - self.config.temperature_min_ref) \
+                            + self.config.temperature_min_ref
         return x 
     
     def test(self):
