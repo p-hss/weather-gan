@@ -17,6 +17,7 @@ def show_config(config):
     print(f'validation: {config.valid_start} - {config.valid_end}')
     print(f'test:       {config.test_start} - {config.test_end}')
     print(f'------------------ hyperparams -----------------')
+    print(f'num workers: {config.num_workers}') 
     print(f'epochs: {config.epochs}') 
     print(f'train batch size: {config.train_batch_size}') 
     print(f'test batch size: {config.test_batch_size}') 

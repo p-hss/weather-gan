@@ -10,7 +10,7 @@ import random
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 from nvidia.dali import pipeline_def, fn
 from dask.diagnostics import ProgressBar
-import cupy as cp
+#import cupy as cp
 import pytorch_lightning as pl
 from src.data import month_from_daily_date
 from torch.utils.data import DataLoader
@@ -20,14 +20,15 @@ class PyTorchDataModule(pl.LightningDataModule):
     """Main class to prepare dataloader for training. """
 
     def __init__(self,
-                 config,
-                 num_workers=0):
+                 config
+                ):
 
 
         super().__init__()
 
         self.config = config
-        #self.num_workers = num_workers
+        self.num_workers = config.num_workers
+        self.prefetch_factor = config.prefetch_factor
         self.train_batch_size = config.train_batch_size
         self.test_batch_size =  config.test_batch_size
         # order of variable lists matters!
@@ -72,9 +73,10 @@ class PyTorchDataModule(pl.LightningDataModule):
 
             self.train_loader = DataLoader(dataset,
                                            batch_size=self.train_batch_size,
+                                           prefetch_factor=self.prefetch_factor,
                                            shuffle=True,
                                            drop_last=True,
-                                           num_workers=4)
+                                           num_workers=self.num_workers)
             
             input_dataset = self.get_dataset('valid', self.input_fname, self.input_variables)
             target_dataset = self.get_dataset('valid', self.target_fname, self.target_variables)
@@ -87,9 +89,10 @@ class PyTorchDataModule(pl.LightningDataModule):
 
             self.valid_loader =  DataLoader(dataset,
                                            batch_size=self.test_batch_size,
+                                           prefetch_factor=self.prefetch_factor,
                                            shuffle=False,
                                            drop_last=True,
-                                           num_workers=4)
+                                           num_workers=self.num_workers)
 
         if stage == 'test':
             input_dataset = self.get_dataset('test', self.input_fname, self.input_variables)
@@ -103,9 +106,10 @@ class PyTorchDataModule(pl.LightningDataModule):
 
             self.test_loader = DataLoader(dataset,
                                            batch_size=self.test_batch_size,
+                                           prefetch_factor=self.prefetch_factor,
                                            shuffle=False,
                                            drop_last=False,
-                                           num_workers=4)
+                                           num_workers=self.num_workers)
 
 
     def train_dataloader(self):
@@ -133,7 +137,9 @@ class ProcessDataset():
     
         #self.ds = xr.open_dataset(fname, chunks={"time": chunk_size})
         #self.ds = xr.open_dataset(fname).load()
-        self.ds = xr.open_dataset(fname)
+        print("loading datasets..")
+        self.ds = xr.open_dataset(fname).load()
+        print("finished")
         self.variables = variables
         self.time_slice = time_slice
         self.data = None

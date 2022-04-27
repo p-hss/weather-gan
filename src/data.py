@@ -10,7 +10,7 @@ import random
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 from nvidia.dali import pipeline_def, fn
 from dask.diagnostics import ProgressBar
-import cupy as cp
+#import cupy as cp
 import pytorch_lightning as pl
 
 
