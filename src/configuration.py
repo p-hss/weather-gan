@@ -36,7 +36,7 @@ class Config:
     
     num_variables: int = 2
     #epochs: int = 250
-    epochs: int = 1
+    epochs: int = 3
     train_batch_size: int = 32
     test_batch_size: int = 64
     lr: float = 0.0002

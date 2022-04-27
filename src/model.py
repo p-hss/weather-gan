@@ -162,6 +162,7 @@ class WeatherGenerator(LightningModule):
         self.b1 = config.beta1 # beta for optimizer
         self.b2 = config.beta2
         self.n_critic = config.n_critic
+        self.lambda_gp = 10
 
         # networks
         self.generator = Generator(in_channels=config.num_variables,
@@ -223,76 +224,93 @@ class WeatherGenerator(LightningModule):
         z = z.type_as(input)
         input = torch.cat([input, z], dim=1)
 
-        lambda_gp = 10
-
         # train generator
         if optimizer_idx == 0:
-
-            # generate images
-            self.generated_imgs = self(input)
-
-            # log sampled images
-            grid = torchvision.utils.make_grid(self.generated_imgs[0,0].unsqueeze(0), nrow=1)
-            self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch,
-                                             dataformats="CHW")
-            grid = torchvision.utils.make_grid(target[1,0], nrow=1)
-            self.logger.experiment.add_image('target_precipitation', grid, self.current_epoch,
-                                             dataformats="CHW")
-            grid = torchvision.utils.make_grid(self.generated_imgs[0,1], nrow=1)
-            self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch,
-                                             dataformats="CHW")
-            grid = torchvision.utils.make_grid(target[0,1], nrow=1)
-            self.logger.experiment.add_image('target_temperature', grid, self.current_epoch,
-                                             dataformats="CHW")
-
-            # ground truth result (ie: all fake)
-            # put on GPU because we created this tensor inside training_loop
-            valid = torch.ones(input.size(0), 1)
-            valid = valid.type_as(input)
 
             generated_fields = self(input)
 
             g_loss = -torch.mean(self.discriminator(generated_fields))
-            tqdm_dict = {'g_loss': g_loss}
+            tqdm_dict = {'g_train_loss': g_loss}
             output = OrderedDict({
                 'loss': g_loss,
                 'progress_bar': tqdm_dict,
                 'log': tqdm_dict
             })
-            self.log("g_loss", g_loss.detach(),
+            self.log("g_train_loss", g_loss.detach(),
                      on_step = True,
                      on_epoch = True,
                      prog_bar = True,
                      logger = True)
             return output
 
-        # train discriminator
-        # Measure discriminator's ability to classify real from generated samples
         elif optimizer_idx == 1:
             fake_imgs = self(input)
 
-            # Real images
             real_validity = self.discriminator(target)
-            # Fake images
             fake_validity = self.discriminator(fake_imgs)
-            # Gradient penalty
             gradient_penalty = self.gradient_penalty(target.data, fake_imgs.data)
-            # Adversarial loss
-            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty
+            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) \
+                     + self.lambda_gp * gradient_penalty
 
-            tqdm_dict = {'d_loss': d_loss}
+            tqdm_dict = {'d_train_loss': d_loss}
             output = OrderedDict({
                 'loss': d_loss,
                 'progress_bar': tqdm_dict,
                 'log': tqdm_dict
             })
 
-            self.log("d_loss", d_loss.detach(),
+            self.log("d_train_loss", d_loss.detach(),
                      on_step = True,
                      on_epoch = True,
                      prog_bar = True,
                      logger = True)
             return output
+
+    def validation_step(self, batch, batch_idx, optimizer_idx):
+
+        input = batch[0]
+        target = batch[1]
+
+        # sample noise
+        z = torch.randn(input.shape[0], self.latent_dim, input.shape[2],  input.shape[3])
+        z = z.type_as(input)
+        input = torch.cat([input, z], dim=1)
+        generated_fields = self(input)
+
+
+        # log sampled images
+        grid = torchvision.utils.make_grid(generated_fields[0,0].unsqueeze(0), nrow=1)
+        self.logger.experiment.add_image('generated_precipitation', grid, self.current_epoch,
+                                         dataformats="CHW")
+        grid = torchvision.utils.make_grid(target[1,0], nrow=1)
+        self.logger.experiment.add_image('target_precipitation', grid, self.current_epoch,
+                                         dataformats="CHW")
+        grid = torchvision.utils.make_grid(generated_fields[0,1], nrow=1)
+        self.logger.experiment.add_image('generated_temperature', grid, self.current_epoch,
+                                         dataformats="CHW")
+        grid = torchvision.utils.make_grid(target[0,1], nrow=1)
+        self.logger.experiment.add_image('target_temperature', grid, self.current_epoch,
+                                         dataformats="CHW")
+
+        g_loss = -torch.mean(self.discriminator(generated_fields))
+
+        self.log("g_val_loss", g_loss.detach(),
+                 on_step = True,
+                 on_epoch = True,
+                 prog_bar = True,
+                 logger = True)
+
+        real_validity = self.discriminator(target)
+        fake_validity = self.discriminator(generated_fields)
+        gradient_penalty = self.gradient_penalty(target.data, generated_fields.data)
+        d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) \
+                 + self.lambda_gp * gradient_penalty
+
+        self.log("d_val_loss", d_loss.detach(),
+                 on_step = True,
+                 on_epoch = True,
+                 prog_bar = True,
+                 logger = True)
 
 
     def configure_optimizers(self):

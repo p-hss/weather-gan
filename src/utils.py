@@ -18,6 +18,7 @@ def show_config(config):
     print(f'test:       {config.test_start} - {config.test_end}')
     print(f'------------------ hyperparams -----------------')
     print(f'num workers: {config.num_workers}') 
+    print(f'prefetch factor: {config.prefetch_factor}') 
     print(f'epochs: {config.epochs}') 
     print(f'train batch size: {config.train_batch_size}') 
     print(f'test batch size: {config.test_batch_size}') 
@@ -34,9 +35,9 @@ def show_config(config):
 
 def get_version():
     model_id = str(uuid1())
-    #date = datetime.now().date().strftime("%Y_%m_%d")
-    date = datetime.now().time().strftime("%Hh_%Mm_%Ss")
-    version = f'{date}/{model_id}'
+    date = datetime.now().date().strftime("%Y_%m_%d")
+    time = datetime.now().time().strftime("%H_%M_%S")
+    version = f'{date}/{time}/{model_id}'
     return version
 
 
