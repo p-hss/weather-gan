@@ -22,7 +22,8 @@ class Inference():
                  ):
         
         self.checkpoint_path = checkpoint_path
-        self.config_path = '/home/ftei-dsw/data/weather-gan/config-files/'
+        #self.config_path = '/home/ftei-dsw/data/weather-gan/config-files/'
+        self.config_path = '/p/tmp/hess/scratch/weather-gan/config-files/'
         self.config = self.load_config()
         self.replace_missing_configuration()
         self.results_path = self.config.results_path
