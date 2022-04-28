@@ -29,7 +29,7 @@ class Config:
     #test_end: int = 2014
     test_end: int = 2001
 
-    num_workers = 8
+    num_workers = 12
     prefetch_factor = 2
     
     model_name: str = 'weather-gan'

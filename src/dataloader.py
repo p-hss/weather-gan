@@ -116,7 +116,7 @@ class PyTorchDataModule(pl.LightningDataModule):
         return self.train_loader
 
 
-    def valid_dataloader(self):
+    def val_dataloader(self):
         return self.valid_loader
 
     
