@@ -25,11 +25,6 @@ def training(config, enable_profiler=False):
                                   name=config.model_name,
                                   default_hp_metric=False,
                                   version=version)
-    
-    model = WeatherGenerator(config)
-                             
-    data = PyTorchDataModule(config)
-    data.setup('fit')
 
     if enable_profiler:
         profiler = 'simple'
@@ -41,5 +36,8 @@ def training(config, enable_profiler=False):
                      logger=tb_logger,
                      callbacks=callbacks,
                      profiler=profiler)
+
+    model = WeatherGenerator(config)
+    data = PyTorchDataModule(config)
     
     trainer.fit(model, data)

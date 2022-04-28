@@ -22,11 +22,9 @@ class Config:
     train_start: int = 1950
     train_end: int = 2000
     valid_start: int = 2001
-    #valid_end: int = 2014
-    valid_end: int = 2001
-    test_start: int = 2001
-    #test_end: int = 2014
-    test_end: int = 2001
+    valid_end: int = 2010
+    test_start: int = 2011
+    test_end: int = 2014
 
     # pre-processing
     epsilon = 0.0001
@@ -37,19 +35,19 @@ class Config:
 
     # training
     model_name: str = 'weather-gan'
-    num_workers = 12
+    num_workers = 2
     prefetch_factor = 2
     num_variables: int = 2
     #epochs: int = 250
-    epochs: int = 3
-    train_batch_size: int = 32
-    test_batch_size: int = 64
+    epochs: int = 250
+    train_batch_size: int = 16
+    test_batch_size: int = 8 # should be small for running on the cluster due to memory issues
     lr: float = 0.0002
     beta1: float = 0.5
     beta2: float = 0.999
 
     # generator
-    latent_dim: int = 8
+    latent_dim: int = 6
     apply_dropout: bool = False
     generator_channels: int = 64
     generator_num_resblocks: int = 5

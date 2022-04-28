@@ -230,7 +230,7 @@ class WeatherGenerator(LightningModule):
             generated_fields = self(input)
 
             g_loss = -torch.mean(self.discriminator(generated_fields))
-            tqdm_dict = {'g_train_loss': g_loss}
+            tqdm_dict = {'g_train_loss': g_loss.detach()}
             output = OrderedDict({
                 'loss': g_loss,
                 'progress_bar': tqdm_dict,
@@ -252,7 +252,7 @@ class WeatherGenerator(LightningModule):
             d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) \
                      + self.lambda_gp * gradient_penalty
 
-            tqdm_dict = {'d_train_loss': d_loss}
+            tqdm_dict = {'d_train_loss': d_loss.detach()}
             output = OrderedDict({
                 'loss': d_loss,
                 'progress_bar': tqdm_dict,
