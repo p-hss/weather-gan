@@ -8,7 +8,7 @@ def get_callbacks(checkpoint_path) -> list:
                                           #monitor="g_val_loss",
                                           dirpath=checkpoint_path,
                                           save_top_k = -1,
-                                          every_n_epochs = 2,
+                                          every_n_epochs=3,
                                           save_last=True)
 
     callbacks = [lr_logger, checkpoint_callback]

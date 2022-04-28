@@ -34,10 +34,10 @@ class Config:
     temperature_max_ref = 320
     log_precipitation_min_ref = 0 
     log_precipitation_max_ref = 4
-    
+
     # training
     model_name: str = 'weather-gan'
-    num_workers = 8
+    num_workers = 12
     prefetch_factor = 2
     num_variables: int = 2
     #epochs: int = 250
