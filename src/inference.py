@@ -33,7 +33,6 @@ class Inference():
         self.test_start = str(self.config.test_start)
         self.test_end = str(self.config.test_end)
 
-        self.model = None
         self.generator = None
         self.discriminator = None
         self.model_output = None
@@ -135,13 +134,16 @@ class Inference():
                     break
         self.model_output = torch.cat(data)
 
-    def get_target(self):
+    def get_target_and_input(self):
         dataloader = self.get_dataloader()
         target = []
+        input = []
         for i, batch in enumerate(tqdm(dataloader)):
             target.append(batch[0]['target'])
+            input.append(batch[0]['input'])
         target = torch.cat(target)
-        return target
+        input = torch.cat(input)
+        return {'target': target, 'input': input}
 
     def apply_inverse_transforms(self):
         for i in range(len(self.model_output)):

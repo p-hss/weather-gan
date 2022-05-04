@@ -8,3 +8,5 @@ mkdir -p /tmp/singularity/mnt/session
 cd /home/hess/projects/weather-gan/
 
 singularity run --nv --bind /p /home/hess/projects/container/singularity-pytorch/stack_v4.sif python main.py
+
+exit

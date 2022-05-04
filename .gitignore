@@ -11,3 +11,4 @@ src/.ipynb_checkpoints/
 *.sif
 *.html
 *.loc
+jobs/out
