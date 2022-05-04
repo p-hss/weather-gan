@@ -1,24 +1,44 @@
 import matplotlib.pyplot as plt
+import cartopy
+import cartopy.crs as ccrs
+import numpy as np
+import matplotlib.pyplot as plt
+from os.path import expanduser
+cartopy.config['pre_existing_data_dir'] = expanduser('/p/tmp/hess/cartopy/shapefiles/natural_earth/physical/')
+
+def plot_map(data, ax, vmin, vmax, cmap):
+
+    lats = np.arange(-90,90,2.5)
+    lons = np.arange(182,360,2.5)
+    lons, lats = np.meshgrid(lons, lats)
+
+    im = ax.pcolormesh(lons, lats, data,
+                transform=ccrs.PlateCarree(),
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax)
+    ax.coastlines()
+    gl = ax.gridlines(crs=ccrs.PlateCarree(),
+                      draw_labels=True,
+                      linewidth=1,
+                      color='gray',
+                      alpha=0.5,
+                      linestyle='--')
+    gl.right_labels = False
+    gl.top_labels = False
+    return im
 
 def plot_sample(batch, title=None):
-    plt.figure(figsize=(12,4))
-    plt.subplot(1,2,1)
+    fig = plt.figure(figsize=(12, 4))
+    ax = fig.add_subplot(1, 2, 1, projection=ccrs.PlateCarree())
     data = batch[0]
-    im = plt.imshow(data*3600*24,
-                    cmap='YlGnBu',
-                    vmin=0,
-                    vmax=15,
-                    origin='lower')
+    im = plot_map(data*3600*24, ax, 0, 15, 'YlGnBu')
     plt.colorbar(im, label='Precipitation [mm/day]')
     plt.title(title)
 
-    plt.subplot(1,2,2)
+    ax = fig.add_subplot(1, 2, 2, projection=ccrs.PlateCarree())
     data = batch[1]
-    im = plt.imshow(data,
-                    cmap='seismic',
-                    vmin=230,
-                    vmax=310,
-                    origin='lower')
+    im = plot_map(data, ax, 230, 310, 'jet')
     plt.colorbar(im, label='Temperature [K]')
     plt.title(title)
     plt.show()

@@ -9,6 +9,7 @@ from src.model import WeatherGenerator
 from src.utils import config_from_file
 from src.data import DataModule, Transforms
 from src.plots import plot_sample
+from src.dataloader import PyTorchDataModule
 
 
 class Inference():
@@ -58,6 +59,20 @@ class Inference():
         """
         if hasattr(self.config, 'n_critic') is False:
             self.config.n_critic = 5 
+        if hasattr(self.config, 'num_workers') is False:
+            self.config.num_workers = 3 
+        if hasattr(self.config, 'prefetch_factor') is False:
+            self.config.prefetch_factor = 2 
+        if hasattr(self.config, 'epsilon') is False:
+            self.config.epsilon = 0.0001 
+        if hasattr(self.config, 'temperature_min_ref') is False:
+            self.config.temperature_min_ref = 190
+        if hasattr(self.config, 'temperature_max_ref') is False:
+            self.config.temperature_max_ref = 320
+        if hasattr(self.config, 'log_precipitation_min_ref') is False:
+            self.config.log_precipitation_min_ref = 0
+        if hasattr(self.config, 'log_precipitation_max_ref') is False:
+            self.config.log_precipitation_max_ref = 4
         if hasattr(self.config, 'discriminator_num_layers') is False:
             self.config.discriminator_num_layers = 3 
 
@@ -109,7 +124,7 @@ class Inference():
 
 
     def get_dataloader(self):
-        datamodule = DataModule(self.config)
+        datamodule = PyTorchDataModule(self.config)
         datamodule.setup("test")
         dataloader = datamodule.test_dataloader()
         return dataloader
@@ -122,7 +137,7 @@ class Inference():
         data = []
         print("Start inference:")
         for idx, sample in enumerate(tqdm(dataloader)):
-            input = sample[0]['input'].to(self.device)
+            input = sample[0].to(self.device)
             z = torch.randn(input.shape[0], self.config.latent_dim, input.shape[2],  input.shape[3])
             z = z.type_as(input)
             input = torch.cat([input, z], dim=1)
@@ -139,8 +154,8 @@ class Inference():
         target = []
         input = []
         for i, batch in enumerate(tqdm(dataloader)):
-            target.append(batch[0]['target'])
-            input.append(batch[0]['input'])
+            target.append(batch[1])
+            input.append(batch[0])
         target = torch.cat(target)
         input = torch.cat(input)
         return {'target': target, 'input': input}
